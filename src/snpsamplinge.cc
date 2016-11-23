@@ -860,3 +860,121 @@ SNPSamplingE::load_gamma()
   }
   fclose(f);
 }
+
+// for GCAT
+void
+SNPSamplingE::split_all_SNPs()
+{
+    // split SNPs into _nthread chunks
+    uint32_t chunk_size = (int)(((double)_loc) / _nthreads);
+    uint32_t t = 0, c = 0;
+    
+    for (uint32_t i = 0; i < _l; ++i) {
+        SNPChunkMap::iterator it = _snp_chunk_map.find(t);
+        if (it == _chunk_map.end()) {
+            SNPsList *il = new SNPsList;
+            _snp_chunk_map[t] = il;
+        }
+        SNPsList *il = _snp_chunk_map[t];
+        _snp_chunk_map[t] = il;
+        il->push_back(i);
+        c++;
+        if (c >= chunk_size && t < (uint32_t)_nthreads - 1) {
+            c = 0;
+            t++;
+        }
+    }
+}
+
+// for GCAT
+void SnpSamplingE::infer_without_save()
+{
+    split_all_indivs();
+    
+    while (1) {
+        _loc = gsl_rng_uniform_int(_r, _l);
+        debug("LOC = %d", _loc);
+        optimize_lambda(_loc);
+        
+        // threads update gamma in the next iteration
+        // prior to updating phis
+        
+        debug("x = %d, lambda = %s", _x, _lambda.s(_loc).c_str());
+        debug("loc = %d, beta = %s\n", _loc, _Ebeta.s(_loc).c_str());
+        debug("n  30, gamma = %s", _gamma.s(30).c_str());
+        
+        _iter++;
+        
+        if (_iter % 100 == 0) {
+            printf("\riteration = %d took %d secs", _iter, duration());
+            fflush(stdout);
+        }
+        
+        if (_iter % _env.reportfreq == 0) {
+            printf("iteration = %d took %d secs\n",
+                   _iter, duration());
+            lerr("iteration = %d took %d secs\n", _iter, duration());
+            lerr("computing heldout likelihood @ %d secs", duration());
+            compute_likelihood(false, true);
+            if (_env.use_test_set)
+                compute_likelihood(false, false);
+            lerr("saving theta @ %d secs", duration());
+            //save_model();
+            lerr("done @ %d secs", duration());
+        }
+        
+        if (_env.terminate) {
+            //save_model();
+            //exit(0);
+            break; // done with infer
+        }
+    }
+}
+
+// for GCAT
+// TODO: make multithreaded!
+void
+SnpSamplingE::assoc()
+{
+    // Calculate theta's
+    const double ** const gd = _gamma.const_data();
+    double **theta = _Etheta.data();
+    for (uint32_t n = 0; n < _n; ++n) {
+        double s = .0;
+        for (uint32_t k = 0; k < _k; ++k)
+            s += gd[n][k];
+        assert(s);
+        for (uint32_t k = 0; k < _k; ++k)
+            theta[n][k] = gd[n][k] / s;
+    }
+    
+    // Calculate betas and pis
+    const double ***ld = _lambda.const_data();
+    double beta;
+    double *pi = (double *) malloc(_n*sizeof(double));
+
+    // Parallelize over locations
+    for (uint32_t loc = 0; loc < _l; ++loc) {
+      std::fill(pi, pi+_n, 0);
+      for (uint32_t k = 0; k < _k; ++k) {
+          double s = .0;
+          for (uint32_t t = 0; t < _t; ++t)
+              s += ld[loc][k][t];
+          beta = ld[loc][k][0] / s;
+          for(uint32_t n = 0; n < _n; ++n)
+              pi[n] += beta*theta[n][k];
+      }
+      // Run association test for all indivs at this location
+      gcat(pi, _n, _l);
+    }
+}
+
+// for GCAT
+void
+SnpSamplingE::infer_assoc()
+{
+    infer_without_save();
+    estimate_all_theta(); // Already calculated?
+    compute_all_lambda();
+    assoc();
+}

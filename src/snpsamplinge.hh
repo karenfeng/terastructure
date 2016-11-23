@@ -21,6 +21,10 @@
 
 typedef vector<uint32_t> IndivsList;
 typedef std::map<uint32_t, IndivsList *> ChunkMap;
+
+typedef vector<uint32_t> SNPsList; // for GCAT
+typedef std::map<uint32_t, SNPsList *> SNPChunkMap; // for GCAT
+
 class SNPSamplingE;
 class PhiRunnerE : public Thread {
 public:
@@ -253,6 +257,7 @@ private:
   CondMutex _cm;
   ThreadMapE _thread_map;
   ChunkMap _chunk_map;
+  SNPChunkMap _snp_chunk_map; // for GCAT
   BoolMap64 _cthreads;
   bool _hol_mode;
 
