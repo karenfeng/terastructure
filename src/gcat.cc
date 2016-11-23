@@ -9,33 +9,6 @@
 #include <gsl/gsl_matrix.h>
 #include <gsl/gsl_permutation.h>
 
-gsl_matrix *getMatrix(std::string file_name, long M_rows, long M_cols) {
-  double tmp_ele;
-  gsl_matrix *M = gsl_matrix_calloc(M_rows, M_cols);
-  std::ifstream inFile(file_name);
-  
-  for(int i = 0; i < M_rows; i++) {
-    for(int j = 0; j < M_cols; j++) {
-      inFile >> tmp_ele;
-      gsl_matrix_set(M, i, j, tmp_ele);
-    }
-  }
-  return M;
-}
-
-// Reads GSL vector from file
-gsl_vector *getVector(std::string file_name, long V_eles) {
-  double tmp_ele;
-  gsl_vector *V = gsl_vector_calloc(V_eles);
-  std::ifstream inFile(file_name);
-  
-  for(int i = 0; i < V_eles; i++) {
-    inFile >> tmp_ele;
-    gsl_vector_set(V, i, tmp_ele);
-  }
-  return V;
-}
-
 // Calculates deviance of a model using IRLS (iteratively-reweighted least squares)
 double calcDevModel(const gsl_matrix *X, const gsl_vector *y, gsl_vector *b,
                     gsl_vector *bl, int max_iter, double tol) {
@@ -116,114 +89,114 @@ double calcDevModel(const gsl_matrix *X, const gsl_vector *y, gsl_vector *b,
   for(i = 0; i < X_rows; i++) {
     y_i = gsl_vector_get(y, i);
     p_i = gsl_vector_get(p, i);
-    //printf("%f %f\n", y_i, p_i);
     dev += (y_i * log(p_i)) + ((1-y_i)*log(1-p_i));
   }
+
+  // Clean up
   gsl_vector_free(p);
   gsl_vector_free(f);
   gsl_matrix_free(W);
   gsl_matrix_free(Wo);
   gsl_permutation_free(W_permut);
+
   return dev;
 }
 
-double *getDiffDev(std::string lf_file, std::string geno_file, std::string trait_file, int tot_snp, int tot_indiv, int tot_lf, int max_iter, double tol) {
+// TODO: allow for user-inputted covariates (in X)
+// Calculates log odds 
+double getDiffDev(gsl_vector *y, gsl_vector *pi, gsl_vector *trait, uint32_t n, int max_iter, double tol) {
   // Difference of deviance
-  double *diff_dev = (double*) malloc(sizeof(double)*tot_snp);
+  double diff_dev;
   // Deviance of null and alt models for log-likelihood
   double dev_null, dev_alt;
   // Iteration values
   int i, j;
-  int y_ij; // Number of major alleles
-  double X_ij;
+  int y_i; // Number of major alleles
+  double trait_i;
   // GSL matrices and vectors for IRLS
-  gsl_matrix *LF = getMatrix(lf_file, tot_indiv, tot_lf);
-  gsl_vector *trait = getVector(trait_file, tot_indiv);
-  gsl_matrix *X = gsl_matrix_calloc(2*tot_indiv, tot_lf+1); // Stacked LFs and trait
-  gsl_matrix *X_null = gsl_matrix_calloc(2*tot_indiv, tot_lf); // Stacked LFs
-  gsl_matrix *Y = getMatrix(geno_file, tot_snp, tot_indiv);
-  gsl_vector *y = gsl_vector_calloc(2*tot_indiv); // Doubled Y
-  gsl_vector *b_null = gsl_vector_calloc(tot_lf); // Beta for null
-  gsl_vector *bl_null = gsl_vector_calloc(tot_lf); // Beta last for null
-  gsl_vector *b_alt = gsl_vector_calloc(tot_lf+1); // Beta for alt
-  gsl_vector *bl_alt = gsl_vector_calloc(tot_lf+1); // Beta last for alt
+  gsl_matrix *X_null = gsl_matrix_calloc(2*tot_indiv, 1); // Intercept
+  gsl_matrix *X_alt = gsl_matrix_calloc(2*tot_indiv, 2); // Intercept and trait
+  gsl_vector *y_dbl = gsl_vector_calloc(2*tot_indiv); // Doubled genotypes
+  gsl_vector *b_null = gsl_vector_calloc(1); // Beta for null
+  gsl_vector *bl_null = gsl_vector_calloc(1); // Beta last for null
+  gsl_vector *b_alt = gsl_vector_malloc(2); // Beta for alt
+  gsl_vector *bl_alt = gsl_vector_malloc(2); // Beta last for alt
   
-  // Stack 2 copies of traits and LFs to get X
+  // Set values of X
   for(i = 0; i < tot_indiv; i++) {
-    for(j = 0; j < tot_lf; j++) {
-      X_ij = gsl_matrix_get(LF, i, j);
-      // Set for X
-      gsl_matrix_set(X, i, j, X_ij);
-      gsl_matrix_set(X, i+tot_indiv, j, X_ij);
-      // Set for X_null
-      gsl_matrix_set(X_null, i, j, X_ij);
-      gsl_matrix_set(X_null, i+tot_indiv, j, X_ij);
-    }
-    X_ij = gsl_vector_get(trait, i);
-    gsl_matrix_set(X, i, tot_lf, X_ij);
-    gsl_matrix_set(X, i+tot_indiv, tot_lf, X_ij);
+    gsl_matrix_set(X_null, i, 0, 1);
+    gsl_matrix_set(X_null, i+tot_indiv, 0, 1);
+    gsl_matrix_set(X_alt, i, 0, 1);
+    gsl_matrix_set(X_alt, i+tot_indiv, 0, 1);
+    trait_i = gsl_vector_get(trait, i);
+    gsl_matrix_set(X_alt, i, 1, trait_i);
+    gsl_matrix_set(X_alt, i+tot_indiv, 1, trait_i);
   }
-  for(i = 0; i < tot_snp; i++) {
-    // Init doubled y for this SNP
-    for(j = 0; j < tot_indiv; j++) {
-      y_ij = gsl_matrix_get(Y, i, j);
-      if (y_ij == 2) {
-        gsl_vector_set(y, j, 1.0);
-        gsl_vector_set(y, j+tot_indiv, 1.0);
-      } else if(y_ij == 1) {
-        gsl_vector_set(y, j, 1.0);
-        gsl_vector_set(y, j+tot_indiv, 0.0);
-      } else if(y_ij == 0) {
-        gsl_vector_set(y, j, 0.0);
-        gsl_vector_set(y, j+tot_indiv, 0.0);
-      }
+
+  // Double genotype and subtract population structure offset
+  for(i = 0; i < n; i++) {
+    y_i = gsl_vector_get(y, i);
+    pi_i = gsl_vector_get(pi, i);
+    if (y_i == 2) {
+      gsl_vector_set(y_dbl, j, 1.0 - pi_i);
+      gsl_vector_set(y_dbl, j+tot_indiv, 1.0 - pi_i);
+    } else if(y_i == 1) {
+      gsl_vector_set(y_dbl, j, 1.0 - pi_i);
+      gsl_vector_set(y_dbl, j+tot_indiv, 0.0 - pi_i);
+    } else if(y_i == 0) {
+      gsl_vector_set(y_dbl, j, 0.0 - pi_i);
+      gsl_vector_set(y_dbl, j+tot_indiv, 0.0 - pi_i);
     }
-    // Reset b_nulls to 0
-    gsl_vector_set_zero(b_null);
-    gsl_vector_set_zero(bl_null);
-    // Calculate dev for null hypothesis
-    dev_null = calcDevModel(X_null, y, b_null, bl_null, max_iter, tol);
-    // Set b_alt
-    for(j = 0; j < tot_lf; j++) {
-      gsl_vector_set(b_alt, j, gsl_vector_get(b_null, j));
-      gsl_vector_set(bl_alt, j, gsl_vector_get(bl_null, j));
-    }
-    gsl_vector_set(b_alt, tot_lf, 0);
-    gsl_vector_set(bl_alt, tot_lf, 0);
-    // Calculate dev for alt
-    dev_alt = calcDevModel(X, y, b_alt, bl_alt, max_iter, tol);
-    diff_dev[i] = -2*(dev_null - dev_alt);
   }
+
+  // Calculate deviance for null model
+  dev_null = calcDevModel(X_null, y_dbl, b_null, bl_null, max_iter, tol);
+
+  // Set b_alt
+  gsl_vector_set(b_alt, 0, gsl_vector_get(b_null, 0));
+  gsl_vector_set(bl_alt, 0, gsl_vector_get(bl_null, 0));
+  gsl_vector_set(b_alt, 1, 0);
+  gsl_vector_set(bl_alt, 1, 0);
+
+  // Calculate dev for alt model
+  dev_alt = calcDevModel(X, y_dbl, b_alt, bl_alt, max_iter, tol);
+  diff_dev = -2*(dev_null - dev_alt);
+
   // Clean up
-  gsl_matrix_free(X);
-  gsl_matrix_free(Y);
-  gsl_vector_free(y);
-  gsl_vector_free(bl_null);
+  gsl_matrix_free(X_alt);
+  gsl_matrix_free(X_null);
+  gsl_vector_free(y_dbl);
   gsl_vector_free(b_null);
-  gsl_vector_free(bl_alt);
+  gsl_vector_free(bl_null);
   gsl_vector_free(b_alt);
+  gsl_vector_free(bl_alt);
   
   return diff_dev;
 }
 
-NumericVector assoc() {
-  // Algorithmic constants
+// Runs GCAT on one SNP location
+double gcat(const double *y, const double *pi, const double *trait, uint32_t n) {
+  // Convert matrices/vectors into GSL types
+  gsl_vector *trait_gsl = gsl_vector_malloc(n);
+  gsl_vector *y_gsl = gsl_vector_malloc(n);
+  gsl_vector *pi_gsl = gsl_vector_malloc(n);
+
+  for(uint32_t i = 0; i < n; i++) {
+    gsl_vector_set(trait_gsl, i, trait[i]);
+    gsl_vector_set(y_gsl, i, y[i]);
+    gsl_vector_set(pi_gsl, i, pi[i])
+  }
+
+  // Algorithmic constants - should be built into env
   int max_iter = 10;
   double tol = 1e-6;
-  // Constants based on data set
-  int tot_snp = 10000;
-  int tot_indiv = 1000;
-  int tot_lf = 3;
   // Result from calculations
-  double *diffDev = log_reg::getDiffDev("data/LF.txt",
-                                        "data/geno.txt",
-                                        "data/trait.txt",
-                                        tot_snp, tot_indiv, tot_lf, max_iter, tol);
-  // Iterative constants
-  int i = 0;
-  NumericVector assoc(tot_snp);
-  for(i = 0; i < tot_snp; i++) {
-    assoc[i] = diffDev[i];
-  }
-  return assoc;
+  double diff_dev = getDiffDev(y_gsl, pi_gsl, trait_gsl, n, max_iter, tol);
+
+  // Clean up
+  gsl_vector_free(trait_gsl);
+  gsl_vector_free(y_gsl);
+  gsl_vector_free(pi_gsl);
+
+  return diff_dev;
 }

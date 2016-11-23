@@ -933,48 +933,69 @@ void SnpSamplingE::infer_without_save()
 
 // for GCAT
 // TODO: make multithreaded!
-void
+// TODO: add trait to env
+double *
 SnpSamplingE::assoc()
 {
-    // Calculate theta's
-    const double ** const gd = _gamma.const_data();
-    double **theta = _Etheta.data();
-    for (uint32_t n = 0; n < _n; ++n) {
-        double s = .0;
-        for (uint32_t k = 0; k < _k; ++k)
-            s += gd[n][k];
-        assert(s);
-        for (uint32_t k = 0; k < _k; ++k)
-            theta[n][k] = gd[n][k] / s;
-    }
-    
-    // Calculate betas and pis
-    const double ***ld = _lambda.const_data();
-    double beta;
-    double *pi = (double *) malloc(_n*sizeof(double));
+  // Calculate theta's
+  const double ** const gd = _gamma.const_data();
+  double **theta = _Etheta.data();
+  for (uint32_t n = 0; n < _n; ++n) {
+      double s = .0;
+      for (uint32_t k = 0; k < _k; ++k)
+          s += gd[n][k];
+      assert(s);
+      for (uint32_t k = 0; k < _k; ++k)
+          theta[n][k] = gd[n][k] / s;
+  }
 
-    // Parallelize over locations
-    for (uint32_t loc = 0; loc < _l; ++loc) {
-      std::fill(pi, pi+_n, 0);
-      for (uint32_t k = 0; k < _k; ++k) {
-          double s = .0;
-          for (uint32_t t = 0; t < _t; ++t)
-              s += ld[loc][k][t];
-          beta = ld[loc][k][0] / s;
-          for(uint32_t n = 0; n < _n; ++n)
-              pi[n] += beta*theta[n][k];
-      }
-      // Run association test for all indivs at this location
-      gcat(pi, _n, _l);
+  const yval_t ** const snpd = _snp.y().const_data(); // Genotype data
+  const double ***ld = _lambda.const_data(); // Used to calculate pi
+  double *y = (double *) malloc(_n*sizeof(double)); // Genotype data at this SNP
+  double *pi = (double *) malloc(_n*sizeof(double)); // Population struct est. at this SNP
+
+  // Calculate associations over all SNPs
+  double *diff_dev = (double *) malloc(_l*sizeof(double));
+  for (uint32_t loc = 0; loc < _l; ++loc) {
+    // Set genotype data at this SNP
+    for(uint32_t n = 0; n < _n; ++n) {
+      y[n] = (double) snpd[n][loc];
     }
+    // Calculate population struct est. at this SNP
+    for (uint32_t k = 0; k < _k; ++k) {
+        double s = .0;
+        for (uint32_t t = 0; t < _t; ++t)
+            s += ld[loc][k][t];
+        double beta = ld[loc][k][0] / s;
+        for(uint32_t n = 0; n < _n; ++n)
+            pi[n] += beta*theta[n][k];
+    }
+    // Run association test for all indivs at this location
+    diff_dev[loc] = gcat(y, pi, _trait, _n);
+  }
+
+  return diff_dev;
+}
+
+void
+SNPSamplingE::save_diffDev(double *diff_dev)
+{
+  FILE *f = fopen(add_iter_suffix("/diffDev").c_str(), "w");
+  if (!f)  {
+    lerr("cannot open diffDev file:%s\n",  strerror(errno));
+    exit(-1);
+  }
+  for (uint32_t loc = 0; loc < _l; ++n)
+    fprintf(f, "%.8f\n", diff_dev[loc]);
+  fclose(f);
 }
 
 // for GCAT
+// TODO: add to main.cc
 void
 SnpSamplingE::infer_assoc()
 {
     infer_without_save();
-    estimate_all_theta(); // Already calculated?
-    compute_all_lambda();
-    assoc();
+    double *diff_dev = assoc();
+    save_diffDev();
 }
