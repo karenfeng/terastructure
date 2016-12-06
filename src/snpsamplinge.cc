@@ -877,6 +877,49 @@ SNPSamplingE::split_all_SNPs()
 }
 
 // for GCAT
+// TODO: add to main.cc
+void
+SnpSamplingE::infer_assoc()
+{
+    infer_without_save();
+    gcat();
+    save_diff_dev();
+}
+
+void
+SnpSamplingE::read_trait(string s)
+{
+  _trait = new TraitMatrix(_n);
+
+  uint32_t **trait_d = _trait->data();
+
+  //FILE *maff = fopen(Env::file_str("/maf.tsv").c_str(), "w");
+  FILE *f = fopen(s.c_str(), "r");
+  if (!f) {
+    lerr("cannot open file %s:%s", s.c_str(), strerror(errno));
+    return -1;
+  }
+  
+  char tmpbuf[2048*10];
+  assert (tmpbuf > 0);
+
+  for (uint32_t i = 0; i < _env.n; ++i) {
+    if (fscanf(f, "%s\n", tmpbuf) < 0) {
+      printf("Error: unexpected lines in trait file\n");
+      exit(-1);
+    }
+    trait_d[i] = tmpbuf[0] - '0';
+  }
+  fflush(stdout);
+  fclose(f);
+  //fclose(maff);
+
+  return 0;
+}
+
+
+
+// for GCAT
 void SnpSamplingE::infer_without_save()
 {
     split_all_indivs();
@@ -921,11 +964,9 @@ void SnpSamplingE::infer_without_save()
     }
 }
 
-// for GCAT
 // TODO: make multithreaded!
-// TODO: add trait to env
-double *
-SnpSamplingE::assoc(int *trait)
+void
+SnpSamplingE::gcat()
 {
   // Calculate theta's
   const double ** const gd = _gamma.const_data();
@@ -941,16 +982,13 @@ SnpSamplingE::assoc(int *trait)
 
   const yval_t ** const snpd = _snp.y().const_data(); // Genotype data
   const double ***ld = _lambda.const_data(); // Used to calculate pi
-  double *y = (double *) malloc(_n*sizeof(double)); // Genotype data at this SNP
   double *pi = (double *) malloc(_n*sizeof(double)); // Population struct est. at this SNP
 
   // Calculate associations over all SNPs
-  double *diff_dev_all = (double *) malloc(_l*sizeof(double));
+  _diff_dev = new DiffDevArray(_l);
+  double_t **diff_dev_d = _diff_dev->data();
+
   for (uint32_t loc = 0; loc < _l; ++loc) {
-    // Set genotype data at this SNP
-    for(uint32_t n = 0; n < _n; ++n) {
-      y[n] = (double) snpd[n][loc];
-    }
     // Calculate population struct est. at this SNP
     for (uint32_t k = 0; k < _k; ++k) {
         double s = .0;
@@ -961,14 +999,12 @@ SnpSamplingE::assoc(int *trait)
             pi[n] += beta*theta[n][k];
     }
     // Run association test for all indivs at this location
-    diff_dev_all[loc] = gcat(y, pi, trait);
+    _diff_dev_d[loc] = calc_diff_dev(loc, pi);
   }
-
-  return diff_dev_all;
 }
 
 void
-SNPSamplingE::save_diffDev(double *diff_dev_all)
+SNPSamplingE::save_diff_dev()
 {
   FILE *f = fopen(add_iter_suffix("/diffDev").c_str(), "w");
   if (!f)  {
@@ -976,23 +1012,14 @@ SNPSamplingE::save_diffDev(double *diff_dev_all)
     exit(-1);
   }
   for (uint32_t loc = 0; loc < _l; ++n)
-    fprintf(f, "%.8f\n", diff_dev_all[loc]);
+    fprintf(f, "%.8f\n", _diff_dev[loc]);
   fclose(f);
 }
 
-// for GCAT
-// TODO: add to main.cc
-void
-SnpSamplingE::infer_assoc(int *trait)
-{
-    infer_without_save();
-    double *diff_dev_all = assoc(trait);
-    save_diffDev();
-}
 
 // Calculates deviance of a model using IRLS (iteratively-reweighted least squares)
 double
-SNPSamplingE::calcDevModel(const gsl_matrix *X, const gsl_vector *y, gsl_vector *b,
+SNPSamplingE::calc_dev(const gsl_matrix *X, const gsl_vector *y, gsl_vector *b,
   gsl_vector *bl, int max_iter, double tol) {
   // Deviance of model
   double dev = 0;
@@ -1087,10 +1114,11 @@ SNPSamplingE::calcDevModel(const gsl_matrix *X, const gsl_vector *y, gsl_vector 
 // TODO: allow for user-inputted covariates
 // Runs GCAT on one SNP location
 double
-SNPSamplingE::gcat(const double *y, const double *pi, const int *trait) {
+SNPSamplingE::calc_diff_dev(const uint32_t loc) {
   // Iteration values
   int i, j;
   int n_dbl, y_n, pi_n, trait_n;
+  
   // GSL matrices and vectors for IRLS
   gsl_matrix *X_null = gsl_matrix_calloc(2*_n, 1); // Intercept
   gsl_matrix *X_alt = gsl_matrix_calloc(2*_n, 2); // Intercept and trait
@@ -1108,7 +1136,7 @@ SNPSamplingE::gcat(const double *y, const double *pi, const int *trait) {
     gsl_matrix_set(X_null, n_dbl, 0, 1);
     gsl_matrix_set(X_alt, n, 0, 1);
     gsl_matrix_set(X_alt, n_dbl, 0, 1);
-    trait_n = trait[n];
+    trait_n = _trait[n];
     gsl_matrix_set(X_alt, n, 1, trait_n);
     gsl_matrix_set(X_alt, n_dbl, 1, trait_n);
     // Double genotype and subtract population structure offset

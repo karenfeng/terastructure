@@ -135,6 +135,10 @@ public:
   //const double rho_indiv() const { return _rho_indiv; }
   const double rho_indiv(uint32_t n) const { return _rho_indiv[n]; }
 
+  // For GCAT
+  int read_trait(string s);
+  void infer_assoc();
+
 private:
   void init_heldout_sets();
   void set_test_sample();
@@ -187,6 +191,16 @@ private:
   void estimate_theta(uint32_t n, Array &theta) const;
   void estimate_all_theta();
   string add_iter_suffix(const char *c);
+
+  // For GCAT
+  void split_all_SNPs();
+  void infer_without_save();
+  void gcat();
+  void assoc();
+  void save_diff_dev();
+  void read_trait();
+  double calc_dev_model();
+  double calc_diff_dev();
 
   Env &_env;
   SNP &_snp;
@@ -266,6 +280,10 @@ private:
   Array _phinext;
   Matrix _lambdaold;
   Matrix _v;
+
+  // For GCAT
+  TraitArray *_trait;
+  DiffDevArray *_diff_dev
 };
 
 inline void

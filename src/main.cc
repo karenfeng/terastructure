@@ -45,6 +45,7 @@ main(int argc, char **argv)
   
   bool force_overwrite_dir = false;
   string datfname = "network.dat";
+  string traitfname = "trait.dat";
   string label = "";
   uint32_t n = 0, k = 0, l = 0;
   int i = 0;
@@ -65,6 +66,7 @@ main(int argc, char **argv)
   bool snpsamplinge = true; //false;
   bool snpsamplingf = false;
   bool snpsamplingg = false;
+  bool gcat = false;
   double seed = 0;
 
   bool file_suffix = false;
@@ -115,6 +117,13 @@ main(int argc, char **argv)
       //batch = true;
       //online = false;
       //fprintf(stdout, "+ batch option set\n");
+    } else if(strcmp(argv[i], "-trait") == 0) {
+      if (i + 1 > argc - 1) {
+        fprintf(stderr, "+ insufficient arguments!\n");
+        exit(-1);
+      }
+      traitfname = string(argv[++i]);
+      fprintf(stdout, "+ using file %s\n", traitfname.c_str());
     } else if (strcmp(argv[i], "-n") == 0) {
       n = atoi(argv[++i]);
       fprintf(stdout, "+ n = %d\n", n);
@@ -142,6 +151,9 @@ main(int argc, char **argv)
     } else if (strcmp(argv[i], "-loadcmp") == 0) {
       loadcmp = true;
       fprintf(stdout, "+ loadcmp option set\n");
+    } else if(strcmp(argv[i], "-gcat") == 0) {
+      gcat = true;
+      fprintf(stdout, "+ gcat option set\n");
     } /*else if (strcmp(argv[i], "-A") == 0) {
       marginf = true;
       fprintf(stdout, "+ algorithm A option set\n");
@@ -254,7 +266,7 @@ main(int argc, char **argv)
     env.n = snp.n();
   }
 
-  if (!loadcmp) {  
+  if (!loadcmp) {
     /* if (snpsamplinga) {
       SNPSamplingA snpsamplingA(env, snp);
       snpsamplingA.infer();
@@ -267,9 +279,16 @@ main(int argc, char **argv)
     } else if (snpsamplingd) {
       SNPSamplingD snpsamplingD(env, snp);
       snpsamplingD.infer();
-    } else*/ if (snpsamplinge) {
+    } else */ if (snpsamplinge) {
       SNPSamplingE snpsamplingE(env, snp);
-      snpsamplingE.infer();
+      if(gcat) {
+        if (snpsamplingE.readTrait(traitfname.c_str()) < 0) {
+          fprintf(stderr, "error reading %s; quitting\n", traitfname.c_str());
+          return -1;
+        }
+        snpsamplingE.inferAssoc();
+      } else
+        snpsamplingE.infer();
     }/* else if (snpsamplingf) {
       SNPSamplingF snpsamplingF(env, snp);
       snpsamplingF.infer();

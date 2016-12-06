@@ -23,6 +23,8 @@ typedef D2Array<KV> MatrixKV;
 typedef std::pair<uint32_t, uint32_t> LocIndiv;
 typedef D1Array<yval_t> YArray;
 typedef std::map<uint32_t, YArray *> YArrayMap;
+typedef D1Array<uint32_t> TraitArray;
+typedef D1Array<double> DiffDevArray;
 
 typedef std::map<KV, bool> SNPMap;
 typedef std::map<LocIndiv, bool> LocIndivMap;
