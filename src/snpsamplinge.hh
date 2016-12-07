@@ -199,7 +199,7 @@ private:
   void assoc();
   void save_diff_dev();
   void read_trait();
-  double calc_dev_model();
+  double calc_dev();
   double calc_diff_dev();
 
   Env &_env;
