@@ -2,10 +2,6 @@
 #include "log.hh"
 #include <sys/time.h>
 #include <gsl/gsl_histogram.h>
-#include <gsl/gsl_blas.h>
-#include <gsl/gsl_linalg.h>
-#include <gsl/gsl_matrix.h>
-#include <gsl/gsl_permutation.h>
 
 SNPSamplingE::SNPSamplingE(Env &env, SNP &snp)
   :_env(env), _snp(snp),
@@ -853,6 +849,16 @@ SNPSamplingE::load_gamma()
 
 // for GCAT
 void
+SnpSamplingE::infer_assoc()
+{
+    infer_without_save();
+    gcat();
+    save_diff_dev();
+}
+
+// for GCAT
+// TODO: make multithreaded
+void
 SNPSamplingE::split_all_SNPs()
 {
     // split SNPs into _nthread chunks
@@ -876,16 +882,6 @@ SNPSamplingE::split_all_SNPs()
     }
 }
 
-// for GCAT
-// TODO: add to main.cc
-void
-SnpSamplingE::infer_assoc()
-{
-    infer_without_save();
-    gcat();
-    save_diff_dev();
-}
-
 void
 SnpSamplingE::read_trait(string s)
 {
@@ -893,7 +889,6 @@ SnpSamplingE::read_trait(string s)
 
   uint32_t **trait_d = _trait->data();
 
-  //FILE *maff = fopen(Env::file_str("/maf.tsv").c_str(), "w");
   FILE *f = fopen(s.c_str(), "r");
   if (!f) {
     lerr("cannot open file %s:%s", s.c_str(), strerror(errno));
@@ -912,12 +907,9 @@ SnpSamplingE::read_trait(string s)
   }
   fflush(stdout);
   fclose(f);
-  //fclose(maff);
 
   return 0;
 }
-
-
 
 // for GCAT
 void SnpSamplingE::infer_without_save()
@@ -986,21 +978,56 @@ SnpSamplingE::gcat()
 
   // Calculate associations over all SNPs
   _diff_dev = new DiffDevArray(_l);
-  double_t **diff_dev_d = _diff_dev->data();
+  double **diff_dev_d = _diff_dev->data();
+
+  // Initialize vars for IRLS
+  _X_null = gsl_matrix_malloc(2*_n, 1); // Intercept
+  _X_alt = gsl_matrix_malloc(2*_n, 2); // Intercept and trait
+  _y_dbl = gsl_vector_malloc(2*_n); // Doubled genotypes
+  _b_null = gsl_vector_malloc(1); // Beta for null
+  _bl_null = gsl_vector_malloc(1); // Beta last for null
+  _b_alt = gsl_vector_malloc(2); // Beta for alt
+  _bl_alt = gsl_vector_malloc(2); // Beta last for alt
+
+  _p = gsl_vector_malloc(X_rows); // MLE
+  _f = gsl_vector_malloc(X_cols);
+  _W = gsl_matrix_malloc(X_cols, X_cols);
+  _Wo = gsl_matrix_malloc(X_cols, X_cols); // Inverted W
+  _W_permut = gsl_permutation_alloc(X_cols);
+
+  _pi(_n);
 
   for (uint32_t loc = 0; loc < _l; ++loc) {
     // Calculate population struct est. at this SNP
+    for(uint32_t n = 0; n < _n; ++n) {
+      _pi[n] = 0;
+    }
     for (uint32_t k = 0; k < _k; ++k) {
         double s = .0;
         for (uint32_t t = 0; t < _t; ++t)
             s += ld[loc][k][t];
         double beta = ld[loc][k][0] / s;
         for(uint32_t n = 0; n < _n; ++n)
-            pi[n] += beta*theta[n][k];
+            _pi[n] += beta*theta[n][k];
     }
     // Run association test for all indivs at this location
     _diff_dev_d[loc] = calc_diff_dev(loc, pi);
   }
+
+  // Clean up
+  gsl_matrix_free(_X_alt);
+  gsl_matrix_free(_X_null);
+  gsl_vector_free(_y_dbl);
+  gsl_vector_free(_b_null);
+  gsl_vector_free(_bl_null);
+  gsl_vector_free(_b_alt);
+  gsl_vector_free(_bl_alt);
+
+  gsl_vector_free(_p);
+  gsl_vector_free(_f);
+  gsl_matrix_free(_W);
+  gsl_matrix_free(_Wo);
+  gsl_permutation_free(_W_permut);
 }
 
 void
@@ -1016,25 +1043,74 @@ SNPSamplingE::save_diff_dev()
   fclose(f);
 }
 
+// TODO: allow for user-inputted covariates
+// Runs GCAT on one SNP location
+double
+SNPSamplingE::calc_diff_dev() {
+  // Iteration values
+  int i, j;
+  int n_dbl, y_n, trait_n;
+  double pi_n;
+
+  const yval_t ** const snpd = _snp.y().const_data();
+  
+  // Set values of X
+  for(int n = 0; n < _n; n++) {
+    n_dbl = n+_n;
+    // Set values of X
+    gsl_matrix_set(_X_null, n, 0, 1);
+    gsl_matrix_set(_X_null, n_dbl, 0, 1);
+    gsl_matrix_set(_X_alt, n, 0, 1);
+    gsl_matrix_set(_X_alt, n_dbl, 0, 1);
+    trait_n = _trait[n];
+    gsl_matrix_set(_X_alt, n, 1, trait_n);
+    gsl_matrix_set(_X_alt, n_dbl, 1, trait_n);
+    // Double genotype and subtract population structure offset
+    y_n = snpd[n];
+    pi_n = _pi[n];
+    if (y_n == 2) {
+      gsl_vector_set(_y_dbl, n, 1.0 - pi_n);
+      gsl_vector_set(_y_dbl, n_dbl, 1.0 - pi_n);
+    } else if(y_n == 1) {
+      gsl_vector_set(_y_dbl, n, 1.0 - pi_n);
+      gsl_vector_set(_y_dbl, n_dbl, 0.0 - pi_n);
+    } else if(y_n == 0) {
+      gsl_vector_set(_y_dbl, n, 0.0 - pi_n);
+      gsl_vector_set(_y_dbl, n_dbl, 0.0 - pi_n);
+    }
+  }
+
+  // TODO: SET ALL VALUES OF B_NULL, B, B_ALT, ETC. TO 0
+  gsl_vector_set_zero(_b_null);
+  gsl_vector_set_zero(_bl_null);
+
+  // Algorithmic constants - should be built into env
+  _max_iter = 10;
+  _tol = 1e-6;
+  // Calculate deviance for null model
+  double dev_null = calc_dev(true);
+
+  // Set b_alt
+  gsl_vector_set(_b_alt, 0, gsl_vector_get(_b_null, 0));
+  gsl_vector_set(_bl_alt, 0, gsl_vector_get(_bl_null, 0));
+  gsl_vector_set(_b_alt, 1, 0);
+  gsl_vector_set(_bl_alt, 1, 0);
+
+  // Calculate deviance for alt model
+  double dev_alt = calc_dev(false);
+
+  double diff_dev = -2*(dev_null - dev_alt);
+  return diff_dev;
+}
 
 // Calculates deviance of a model using IRLS (iteratively-reweighted least squares)
 double
-SNPSamplingE::calc_dev(const gsl_matrix *X, const gsl_vector *y, gsl_vector *b,
-  gsl_vector *bl, int max_iter, double tol) {
+SNPSamplingE::calc_dev(bool null_model) {
   // Deviance of model
   double dev = 0;
   // Stopping condition
   double max_rel_change;
   double rel_change;
-  // Utility sizes
-  long X_rows = X->size1;
-  long X_cols = X->size2;
-  // GSL matrices and vectors for calculations
-  gsl_vector *p = gsl_vector_calloc(X_rows); // MLE
-  gsl_vector *f = gsl_vector_calloc(X_cols);
-  gsl_matrix *W = gsl_matrix_calloc(X_cols, X_cols);
-  gsl_matrix *Wo = gsl_matrix_calloc(X_cols, X_cols); // Inverted W
-  gsl_permutation *W_permut = gsl_permutation_calloc(X_cols);
   // Values for iteration
   int signum;
   long i, j, k;
@@ -1043,43 +1119,64 @@ SNPSamplingE::calc_dev(const gsl_matrix *X, const gsl_vector *y, gsl_vector *b,
   double bl_i;
   double p_i, p_k;
   double w_ij;
-  double f_i;
+
+  gsl_matrix *X;
+  gsl_vector *b;
+  gsl_vector *bl;
+  if (null_model) {
+    X = _X_null;
+    b = _b_null;
+    bl = _bl_null;
+  } else {
+    X = _X_alt;
+    b = _b_alt;
+    bl = _bl_alt;
+  }
+  // Utility sizes
+  long X_rows = X->size1;
+  long X_cols = X->size2;
+
+  // TODO: SET ALL VECTS ETC. TO 0S
+  gsl_vector_set_zero(_p);
+  gsl_vector_set_zero(_f);
+  gsl_matrix_set_zero(_W);
+  gsl_matrix_set_zero(_Wo);
+  gsl_permutation_init(_W_permut);
   
-  for(n_iter = 0; n_iter < max_iter; n_iter++) {
+  for(n_iter = 0; n_iter < _max_iter_irls; n_iter++) {
     // p <- as.vector(1/(1 + exp(-X %*% b)))
-    gsl_blas_dgemv(CblasNoTrans, -1.0, X, b, 0.0, p);
+    gsl_blas_dgemv(CblasNoTrans, -1.0, X, b, 0.0, _p);
     for(i = 0; i < X_rows; i++) {
-      gsl_vector_set(p, i, 1/(1+exp(gsl_vector_get(p, i))));
+      gsl_vector_set(_p, i, 1/(1+exp(gsl_vector_get(_p, i))));
     }
     // var.b <- solve(crossprod(X, p * (1 - p) * X))
-    gsl_matrix_set_zero(W);
+    gsl_matrix_set_zero(_W);
     for(i = 0; i < X_cols; i++) {
       for(j = i; j < X_cols; j++) {
         for(k = 0; k < X_rows; k++) {
-          p_k = gsl_vector_get(p, k);
-          w_ij = gsl_matrix_get(W, i, j) +
+          p_k = gsl_vector_get(_p, k);
+          w_ij = gsl_matrix_get(_W, i, j) +
             (gsl_matrix_get(X, k, i) *
             gsl_matrix_get(X, k, j) *
             p_k * (1-p_k));
-          gsl_matrix_set(W, i, j, w_ij);
+          gsl_matrix_set(_W, i, j, w_ij);
         }
         // Reflect (symmetry)
         if (i != j) {
-          gsl_matrix_set(W, j, i, gsl_matrix_get(W, i, j));
+          gsl_matrix_set(_W, j, i, gsl_matrix_get(_W, i, j));
         }
       }
     }
-    gsl_linalg_LU_decomp(W, W_permut, &signum);
-    gsl_linalg_LU_invert(W, W_permut, Wo);
+    gsl_linalg_LU_decomp(_W, _W_permut, &signum);
+    gsl_linalg_LU_invert(_W, _W_permut, Wo);
     // b = b + Wo %*% X*(y-p)
     gsl_vector_set_zero(f);
     for(i = 0; i < X_cols; i++) {
       for(j = 0; j < X_rows; j++) {
-        f_i = gsl_vector_get(f, i) + gsl_matrix_get(X, j, i) * (gsl_vector_get(y, j) - gsl_vector_get(p, j));
-        gsl_vector_set(f, i, f_i);
+        gsl_vector_set(_f, i, gsl_vector_get(_f, i) + gsl_matrix_get(X, j, i) * (gsl_vector_get(_y_dbl, j) - gsl_vector_get(_p, j)));
       }
     }
-    gsl_blas_dgemv(CblasNoTrans, 1.0, Wo, f, 1.0, b);
+    gsl_blas_dgemv(CblasNoTrans, 1.0, Wo, _f, 1.0, b);
     // Stopping condition
     max_rel_change = 0;
     for(i = 0; i < X_cols; i++) {
@@ -1089,95 +1186,17 @@ SNPSamplingE::calc_dev(const gsl_matrix *X, const gsl_vector *y, gsl_vector *b,
         max_rel_change = rel_change;
       }
     }
-    if (max_rel_change < tol) {
+    if (max_rel_change < _tol_irls) {
       break;
     }
     gsl_vector_memcpy(bl, b);
   }
   // Calculate deviance
   for(i = 0; i < X_rows; i++) {
-    y_i = gsl_vector_get(y, i);
-    p_i = gsl_vector_get(p, i);
+    y_i = gsl_vector_get(_y_dbl, i);
+    p_i = gsl_vector_get(_p, i);
     dev += (y_i * log(p_i)) + ((1-y_i)*log(1-p_i));
   }
 
-  // Clean up
-  gsl_vector_free(p);
-  gsl_vector_free(f);
-  gsl_matrix_free(W);
-  gsl_matrix_free(Wo);
-  gsl_permutation_free(W_permut);
-
   return dev;
-}
-
-// TODO: allow for user-inputted covariates
-// Runs GCAT on one SNP location
-double
-SNPSamplingE::calc_diff_dev(const uint32_t loc) {
-  // Iteration values
-  int i, j;
-  int n_dbl, y_n, pi_n, trait_n;
-  
-  // GSL matrices and vectors for IRLS
-  gsl_matrix *X_null = gsl_matrix_calloc(2*_n, 1); // Intercept
-  gsl_matrix *X_alt = gsl_matrix_calloc(2*_n, 2); // Intercept and trait
-  gsl_vector *y_dbl = gsl_vector_calloc(2*_n); // Doubled genotypes
-  gsl_vector *b_null = gsl_vector_calloc(1); // Beta for null
-  gsl_vector *bl_null = gsl_vector_calloc(1); // Beta last for null
-  gsl_vector *b_alt = gsl_vector_malloc(2); // Beta for alt
-  gsl_vector *bl_alt = gsl_vector_malloc(2); // Beta last for alt
-  
-  // Set values of X
-  for(int n = 0; n < _n; n++) {
-    n_dbl = n+_n;
-    // Set values of X
-    gsl_matrix_set(X_null, n, 0, 1);
-    gsl_matrix_set(X_null, n_dbl, 0, 1);
-    gsl_matrix_set(X_alt, n, 0, 1);
-    gsl_matrix_set(X_alt, n_dbl, 0, 1);
-    trait_n = _trait[n];
-    gsl_matrix_set(X_alt, n, 1, trait_n);
-    gsl_matrix_set(X_alt, n_dbl, 1, trait_n);
-    // Double genotype and subtract population structure offset
-    y_n = y[n];
-    pi_n = pi[n];
-    if (y_n == 2) {
-      gsl_vector_set(y_dbl, n, 1.0 - pi_n);
-      gsl_vector_set(y_dbl, n_dbl, 1.0 - pi_n);
-    } else if(y_n == 1) {
-      gsl_vector_set(y_dbl, n, 1.0 - pi_n);
-      gsl_vector_set(y_dbl, n_dbl, 0.0 - pi_n);
-    } else if(y_n == 0) {
-      gsl_vector_set(y_dbl, n, 0.0 - pi_n);
-      gsl_vector_set(y_dbl, n_dbl, 0.0 - pi_n);
-    }
-  }
-
-  // Algorithmic constants - should be built into env
-  const int max_iter = 10;
-  const double tol = 1e-6;
-  // Calculate deviance for null model
-  double dev_null = calcDevModel(X_null, y_dbl, b_null, bl_null, max_iter, tol);
-
-  // Set b_alt
-  gsl_vector_set(b_alt, 0, gsl_vector_get(b_null, 0));
-  gsl_vector_set(bl_alt, 0, gsl_vector_get(bl_null, 0));
-  gsl_vector_set(b_alt, 1, 0);
-  gsl_vector_set(bl_alt, 1, 0);
-
-  // Calculate deviance for alt model
-  double dev_alt = calcDevModel(X, y_dbl, b_alt, bl_alt, max_iter, tol);
-
-  // Clean up
-  gsl_matrix_free(X_alt);
-  gsl_matrix_free(X_null);
-  gsl_vector_free(y_dbl);
-  gsl_vector_free(b_null);
-  gsl_vector_free(bl_null);
-  gsl_vector_free(b_alt);
-  gsl_vector_free(bl_alt);
-  
-  double diff_dev = -2*(dev_null - dev_alt);
-  return diff_dev;
 }

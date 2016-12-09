@@ -239,11 +239,11 @@ main(int argc, char **argv)
     } else */ if (snpsamplinge) {
       SNPSamplingE snpsamplingE(env, snp);
       if(gcat) {
-        if (snpsamplingE.readTrait(traitfname.c_str()) < 0) {
+        if (snpsamplingE.read_trait(traitfname.c_str()) < 0) {
           fprintf(stderr, "error reading %s; quitting\n", traitfname.c_str());
           return -1;
         }
-        snpsamplingE.inferAssoc();
+        snpsamplingE.infer_assoc();
       } else
         snpsamplingE.infer();
     }/* else if (snpsamplingf) {

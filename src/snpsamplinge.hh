@@ -19,6 +19,11 @@
 #include <gsl/gsl_sf_psi.h>
 #include <gsl/gsl_sf.h>
 
+#include <gsl/gsl_blas.h>
+#include <gsl/gsl_linalg.h>
+#include <gsl/gsl_matrix.h>
+#include <gsl/gsl_permutation.h>
+
 typedef vector<uint32_t> IndivsList;
 typedef std::map<uint32_t, IndivsList *> ChunkMap;
 
@@ -284,6 +289,26 @@ private:
   // For GCAT
   TraitArray *_trait;
   DiffDevArray *_diff_dev
+  // GSL matrices and vectors for IRLS
+  gsl_matrix *_X_null; // Intercept
+  gsl_matrix *_X_alt; // Intercept and trait
+  gsl_vector *_y_dbl; // Doubled genotypes
+  gsl_vector *_b_null; // Beta for null
+  gsl_vector *_bl_null; // Beta last for null
+  gsl_vector *_b_alt; // Beta for alt
+  gsl_vector *_bl_alt; // Beta last for alt
+
+  gsl_vector *_p; // MLE
+  gsl_vector *_f;
+  gsl_matrix *_W;
+  gsl_matrix *_Wo; // Inverted W
+  gsl_permutation *_W_permut;
+
+  Array _pi;
+
+  // Constants for IRLS
+  int _max_iter_irls;
+  double _tol_irls;
 };
 
 inline void
