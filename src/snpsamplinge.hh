@@ -19,10 +19,7 @@
 #include <gsl/gsl_sf_psi.h>
 #include <gsl/gsl_sf.h>
 
-#include <gsl/gsl_blas.h>
 #include <gsl/gsl_linalg.h>
-#include <gsl/gsl_matrix.h>
-#include <gsl/gsl_permutation.h>
 
 typedef vector<uint32_t> IndivsList;
 typedef std::map<uint32_t, IndivsList *> ChunkMap;
@@ -204,8 +201,8 @@ private:
   void assoc();
   void save_diff_dev();
   void read_trait();
-  double calc_dev();
-  double calc_diff_dev();
+  double calc_dev(bool null_model);
+  double calc_diff_dev(uint32_t loc);
 
   Env &_env;
   SNP &_snp;
@@ -287,22 +284,29 @@ private:
   Matrix _v;
 
   // For GCAT
-  TraitArray *_trait;
-  DiffDevArray *_diff_dev
-  // GSL matrices and vectors for IRLS
-  gsl_matrix *_X_null; // Intercept
-  gsl_matrix *_X_alt; // Intercept and trait
-  gsl_vector *_y_dbl; // Doubled genotypes
-  gsl_vector *_b_null; // Beta for null
-  gsl_vector *_bl_null; // Beta last for null
-  gsl_vector *_b_alt; // Beta for alt
-  gsl_vector *_bl_alt; // Beta last for alt
+  TraitArray _trait;
+  DiffDevArray _diff_dev;
 
   gsl_vector *_p; // MLE
-  gsl_vector *_f;
-  gsl_matrix *_W;
-  gsl_matrix *_Wo; // Inverted W
-  gsl_permutation *_W_permut;
+  gsl_vector *_y_dbl; // Doubled genotypes
+
+  // Null model
+  gsl_matrix *_X_null;
+  gsl_vector *_b_null;
+  gsl_vector *_bl_null;
+  gsl_vector *_f_null;
+  gsl_matrix *_W_null;
+  gsl_matrix *_Wo_null;
+  gsl_permutation *_W_permut_null;
+
+  // Alt model
+  gsl_matrix *_X_alt;
+  gsl_vector *_b_alt;
+  gsl_vector *_bl_alt;
+  gsl_vector *_f_alt;
+  gsl_matrix *_W_alt;
+  gsl_matrix *_Wo_alt;
+  gsl_permutation *_W_permut_alt;
 
   Array _pi;
 

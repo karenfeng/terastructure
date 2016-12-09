@@ -229,30 +229,6 @@ Env::Env(uint32_t N, uint32_t K, uint32_t L,
     blocks = 10;
     indiv_sample_size = N / blocks;
   }
-
-<<<<<<< HEAD
-=======
-  plog("n", n);
-  plog("k", k);
-  plog("t", t);
-  plog("l", l);
-  plog("nthreads", nthreads);
-  plog("tau0", tau0);
-  plog("nodetau0", nodetau0);
-  plog("kappa", kappa);
-  plog("nodekappa", nodekappa);
-  plog("alpha", alpha);
-  plog("heldout_indiv_ratio", heldout_indiv_ratio);
-  plog("validation_ratio", validation_ratio);
-  plog("online_iterations", online_iterations);
-  plog("GSL seed", seed);
-  plog("file suffix", file_suffix);
-  plog("save beta", save_beta);
-  plog("adagrad", adagrad);
-  plog("indiv sample size", indiv_sample_size);
-  plog("blocks", blocks);
-  plog("compute_beta", compute_beta);
-  plog("stop_threshold", stop_threshold);
   
   string ndatfname = file_str("/network.dat");
   unlink(ndatfname.c_str());
