@@ -1,5 +1,7 @@
 #include "snpsamplinge.hh"
 #include "log.hh"
+#include <fstream>
+#include <iostream>
 #include <sys/time.h>
 #include <gsl/gsl_histogram.h>
 #include <gsl/gsl_blas.h>
@@ -889,7 +891,7 @@ SNPSamplingE::split_all_SNPs()
 int
 SNPSamplingE::read_trait(string s)
 {
-  uint32_t *trait_d = _trait.data();
+  double *trait_d = _trait.data();
 
   FILE *f = fopen(s.c_str(), "r");
   if (!f) {
@@ -897,15 +899,15 @@ SNPSamplingE::read_trait(string s)
     return -1;
   }
   
-  char tmpbuf[2048*10];
-  assert (tmpbuf > 0);
+  // Assuming FAM file format
+  double famID, sampID, patID, matID, sex, aff;
 
   for (uint32_t i = 0; i < _env.n; ++i) {
-    if (fscanf(f, "%s\n", tmpbuf) < 0) {
+    if (fscanf(f, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", &famID, &sampID, &patID, &matID, &sex, &aff) < 0) {
       printf("Error: unexpected lines in trait file\n");
       exit(-1);
     }
-    trait_d[i] = tmpbuf[0] - '0';
+    trait_d[i] = aff;
   }
   fflush(stdout);
   fclose(f);

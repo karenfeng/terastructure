@@ -1,0 +1,14 @@
+
+*.log
+
+*.status
+
+*.Po
+
+*.Tpo
+
+Makefile
+
+*.o
+
+src/terastructure
