@@ -2,6 +2,7 @@
 #include "log.hh"
 #include <fstream>
 #include <iostream>
+#include <string>
 #include <sys/time.h>
 #include <gsl/gsl_histogram.h>
 #include <gsl/gsl_blas.h>
@@ -900,9 +901,9 @@ SNPSamplingE::read_trait(string s)
 {
   double *trait_d = _trait.data();
 
-  FILE *f = fopen(s.c_str(), "r");
+  FILE *f = fopen(s, "r");
   if (!f) {
-    lerr("cannot open file %s:%s", s.c_str(), strerror(errno));
+    lerr("cannot open file %s:%s", s, strerror(errno));
     return -1;
   }
   
@@ -915,11 +916,11 @@ SNPSamplingE::read_trait(string s)
       printf("Error: unexpected lines in trait file\n");
       exit(-1);
     }
-    std::strtok(tmpbuf, "\t");
+    printf("Token 0: %s", strtok(tmpbuf, " "));
     for(int j = 0; j < 5; j++) {
-      strtok(NULL, "\t");
+      printf("Token %d: %s", j+1, strtok(NULL, " "));
     }
-    trait_d[i] = stod(strtok(NULL, "\t"));
+    trait_d[i] = strtod(strtok(NULL, "\t"), NULL);
     printf("Line %d: %f\n", i, trait_d[i]);
   }
   fflush(stdout);
