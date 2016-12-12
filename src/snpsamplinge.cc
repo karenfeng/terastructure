@@ -436,9 +436,11 @@ SNPSamplingE::infer()
 	     _iter, duration());
       lerr("iteration = %d took %d secs\n", _iter, duration());
       lerr("computing heldout likelihood @ %d secs", duration());
-      compute_likelihood(false, true);
+      if(compute_likelihood(false, true) == -1)
+        break;
       if (_env.use_test_set)
-	compute_likelihood(false, false);
+	if(compute_likelihood(false, false) == -1)
+          break;
       lerr("saving theta @ %d secs", duration());
       save_model();
       lerr("done @ %d secs", duration());
@@ -446,7 +448,10 @@ SNPSamplingE::infer()
 
     if (_env.terminate) {
       save_model();
-      exit(0);
+      if(_run_gcat)
+        break;
+      else
+        exit(0);
     }
   }
   if(_run_gcat) {
@@ -533,7 +538,10 @@ SNPSamplingE::compute_likelihood(bool first, bool validation)
     if (_env.use_validation_stop) {
       _hol_mode = false;
       save_model();
-      exit(0);
+      if(_run_gcat)
+        return -1;
+      else
+        exit(0);
     }
   }
   _hol_mode = false;
@@ -909,52 +917,6 @@ SNPSamplingE::read_trait(string s)
   fclose(f);
 
   return 0;
-}
-
-// for GCAT
-void
-SNPSamplingE::infer_without_save()
-{
-    split_all_indivs();
-    
-    while (1) {
-        _loc = gsl_rng_uniform_int(_r, _l);
-        debug("LOC = %d", _loc);
-        optimize_lambda(_loc);
-        
-        // threads update gamma in the next iteration
-        // prior to updating phis
-        
-        debug("x = %d, lambda = %s", _x, _lambda.s(_loc).c_str());
-        debug("loc = %d, beta = %s\n", _loc, _Ebeta.s(_loc).c_str());
-        debug("n  30, gamma = %s", _gamma.s(30).c_str());
-        
-        _iter++;
-        
-        if (_iter % 100 == 0) {
-            printf("\riteration = %d took %d secs", _iter, duration());
-            fflush(stdout);
-        }
-        
-        if (_iter % _env.reportfreq == 0) {
-            printf("iteration = %d took %d secs\n",
-                   _iter, duration());
-            lerr("iteration = %d took %d secs\n", _iter, duration());
-            lerr("computing heldout likelihood @ %d secs", duration());
-            compute_likelihood(false, true);
-            if (_env.use_test_set)
-                compute_likelihood(false, false);
-            lerr("saving theta @ %d secs", duration());
-            //save_model();
-            lerr("done @ %d secs", duration());
-        }
-        
-        if (_env.terminate) {
-            //save_model();
-            //exit(0);
-            break; // done with infer
-        }
-    }
 }
 
 // TODO: make multithreaded!

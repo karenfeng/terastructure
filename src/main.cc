@@ -66,7 +66,7 @@ main(int argc, char **argv)
   bool snpsamplinge = true; //false;
   bool snpsamplingf = false;
   bool snpsamplingg = false;
-  bool gcat = false;
+  bool run_gcat = false;
   double seed = 0;
 
   bool file_suffix = false;

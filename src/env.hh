@@ -150,7 +150,8 @@ Env::Env(uint32_t N, uint32_t K, uint32_t L,
 	 uint32_t nthreadsv,
 	 bool use_test_setv, bool compute_betav,
 	 string locations_filev,
-	 double stop_thresholdv)
+	 double stop_thresholdv,
+         bool run_gcatv)
   : n(N),
     k(K),
     l(L),
