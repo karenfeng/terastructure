@@ -455,8 +455,11 @@ SNPSamplingE::infer()
     }
   }
   if(_run_gcat) {
+    printf("\nDone with inference. Now running GCAT.\n");
     gcat();
+    printf("\nDone with GCAT. Now saving difference in deviance.\n");
     save_diff_dev();
+    printf("\nDone!\n");
   }
 }
 
@@ -906,11 +909,12 @@ SNPSamplingE::read_trait(string s)
   // Assuming FAM file format
   double famID, sampID, patID, matID, sex, aff;
 
-  for (uint32_t i = 0; i < _env.n; ++i) {
+  for (uint32_t i = 0; i < _n; ++i) {
     if (fscanf(f, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", &famID, &sampID, &patID, &matID, &sex, &aff) < 0) {
       printf("Error: unexpected lines in trait file\n");
       exit(-1);
     }
+    printf("Line %d: %f\n", i, aff);
     trait_d[i] = aff;
   }
   fflush(stdout);
@@ -955,7 +959,7 @@ SNPSamplingE::gcat()
   _Wo_null = gsl_matrix_alloc(cols_null, cols_null); // Inverted W
   _W_permut_null = gsl_permutation_alloc(cols_null);
 
-  int cols_alt = 2;
+  int cols_alt = cols_null+1;
   _X_alt = gsl_matrix_alloc(n2, cols_alt); // Intercept and trait
   _b_alt = gsl_vector_alloc(cols_alt); // Beta for alt
   _bl_alt = gsl_vector_alloc(cols_alt); // Beta last for alt
@@ -1048,7 +1052,6 @@ SNPSamplingE::calc_diff_dev(uint32_t loc) {
     }
   }
 
-  // TODO: SET ALL VALUES OF B_NULL, B, B_ALT, ETC. TO 0
   gsl_vector_set_zero(_b_null);
   gsl_vector_set_zero(_bl_null);
 
@@ -1119,7 +1122,6 @@ SNPSamplingE::calc_dev(bool null_model) {
   // TODO: SET ALL VECTS ETC. TO 0S
   gsl_vector_set_zero(_p);
   gsl_vector_set_zero(f);
-  gsl_matrix_set_zero(W);
   gsl_matrix_set_zero(Wo);
   gsl_permutation_init(W_permut);
   

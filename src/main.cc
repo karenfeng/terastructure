@@ -239,10 +239,12 @@ main(int argc, char **argv)
     } else */ if (snpsamplinge) {
       SNPSamplingE snpsamplingE(env, snp);
       if(run_gcat) {
+        printf("\nReading trait file.\n");
         if (snpsamplingE.read_trait(traitfname.c_str()) < 0) {
           fprintf(stderr, "error reading %s; quitting\n", traitfname.c_str());
           return -1;
         }
+        printf("\nDone reading trait file. Performing inference.\n");
       }
       snpsamplingE.infer();
     }/* else if (snpsamplingf) {
