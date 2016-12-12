@@ -907,15 +907,20 @@ SNPSamplingE::read_trait(string s)
   }
   
   // Assuming FAM file format
-  double famID, sampID, patID, matID, sex, aff;
+  char tmpbuf[2048*10];
+  char *token;
 
   for (uint32_t i = 0; i < _n; ++i) {
-    if (fscanf(f, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", &famID, &sampID, &patID, &matID, &sex, &aff) < 0) {
+    if (fscanf(f, "%s\n", tmpbuf) < 0) {
       printf("Error: unexpected lines in trait file\n");
       exit(-1);
     }
-    printf("Line %d: %f\n", i, aff);
-    trait_d[i] = aff;
+    std::strtok(tmpbuf, "\t");
+    for(int j = 0; j < 5; j++) {
+      strtok(NULL, "\t");
+    }
+    trait_d[i] = stod(strtok(NULL, "\t"));
+    printf("Line %d: %f\n", i, trait_d[i]);
   }
   fflush(stdout);
   fclose(f);
