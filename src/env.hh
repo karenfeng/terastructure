@@ -60,7 +60,8 @@ public:
       bool save_beta, bool adagrad, uint32_t nthreads,
       bool use_test_set,
       bool compute_beta, string locations_file,
-      double stop_threshold);
+      double stop_threshold,
+      bool run_gcat);
   ~Env() { fclose(_plogf); }
   
   static string prefix;
@@ -120,7 +121,9 @@ public:
   bool compute_beta;
   string locations_file;
   double stop_threshold;
-   
+  
+  bool run_gcat;
+ 
   static string file_str(string fname);
 
 private:
@@ -197,7 +200,8 @@ Env::Env(uint32_t N, uint32_t K, uint32_t L,
     use_test_set(use_test_setv),
     compute_beta(compute_betav),
     locations_file(locations_filev),
-    stop_threshold(stop_thresholdv)
+    stop_threshold(stop_thresholdv),
+    run_gcat(run_gcatv)
 {
   ostringstream sa;
   sa << "n" << n << "-";

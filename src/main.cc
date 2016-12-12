@@ -148,9 +148,9 @@ main(int argc, char **argv)
     } else if (strcmp(argv[i], "-loadcmp") == 0) {
       loadcmp = true;
       fprintf(stdout, "+ loadcmp option set\n");
-    } else if(strcmp(argv[i], "-gcat") == 0) {
-      gcat = true;
-      fprintf(stdout, "+ gcat option set\n");
+    } else if(strcmp(argv[i], "-run_gcat") == 0) {
+      run_gcat = true;
+      fprintf(stdout, "+ run_gcat option set\n");
     } /*else if (strcmp(argv[i], "-A") == 0) {
       marginf = true;
       fprintf(stdout, "+ algorithm A option set\n");
@@ -207,7 +207,7 @@ main(int argc, char **argv)
 	  force_overwrite_dir, datfname, label, eta_type,
 	  rfreq, logl, loadcmp, seed, file_suffix, 
 	  save_beta, adagrad, nthreads,
-	  use_test_set, compute_beta, locations_file, stop_threshold);
+	  use_test_set, compute_beta, locations_file, stop_threshold, run_gcat);
   env_global = &env;
   
   SNP snp(env);
@@ -238,14 +238,13 @@ main(int argc, char **argv)
       snpsamplingD.infer();
     } else */ if (snpsamplinge) {
       SNPSamplingE snpsamplingE(env, snp);
-      if(gcat) {
+      if(run_gcat) {
         if (snpsamplingE.read_trait(traitfname.c_str()) < 0) {
           fprintf(stderr, "error reading %s; quitting\n", traitfname.c_str());
           return -1;
         }
-        snpsamplingE.infer_assoc();
-      } else
-        snpsamplingE.infer();
+      }
+      snpsamplingE.infer();
     }/* else if (snpsamplingf) {
       SNPSamplingF snpsamplingF(env, snp);
       snpsamplingF.infer();
@@ -337,6 +336,8 @@ usage()
 	  "\t-force\t\t overwrite existing output directory\n"
 	  "\t-rfreq <val>\t checks for convergence and logs output every <val> iterations\n"
 	  "\t-idmap\t\t file containing individual name/meta-data, one per line\n"
+          "\t-trait <name>\t\t file containing trait data in FAM format\n"
+          "\t-run_gcat\t\t run gcatest\n"
 	  );
   fflush(stdout);
 }

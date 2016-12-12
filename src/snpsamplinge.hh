@@ -284,6 +284,7 @@ private:
   Matrix _v;
 
   // For GCAT
+  bool _run_gcat;
   TraitArray _trait;
   DiffDevArray _diff_dev;
 

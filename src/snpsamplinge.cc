@@ -40,7 +40,8 @@ SNPSamplingE::SNPSamplingE(Env &env, SNP &snp)
    _v(_k,_t),
    _pi(_n),
    _trait(_n),
-   _diff_dev(_l)
+   _diff_dev(_l),
+   _run_gcat(_env.run_gcat)
 {
   printf("+ initialization begin\n");
   fflush(stdout);
@@ -448,6 +449,10 @@ SNPSamplingE::infer()
       exit(0);
     }
   }
+  if(_run_gcat) {
+    gcat();
+    save_diff_dev();
+  }
 }
 
 double
@@ -851,15 +856,6 @@ SNPSamplingE::load_gamma()
     fprintf(f,"%d\n", max_k);
   }
   fclose(f);
-}
-
-// for GCAT
-void
-SNPSamplingE::infer_assoc()
-{
-    infer_without_save();
-    gcat();
-    save_diff_dev();
 }
 
 // for GCAT
