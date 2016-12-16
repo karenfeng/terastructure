@@ -901,9 +901,9 @@ SNPSamplingE::read_trait(string s)
 {
   double *trait_d = _trait.data();
 
-  FILE *f = fopen(s, "r");
+  FILE *f = fopen(s.c_str(), "r");
   if (!f) {
-    lerr("cannot open file %s:%s", s, strerror(errno));
+    lerr("cannot open file %s:%s", s.c_str(), strerror(errno));
     return -1;
   }
   
@@ -912,16 +912,13 @@ SNPSamplingE::read_trait(string s)
   char *token;
 
   for (uint32_t i = 0; i < _n; ++i) {
-    if (fscanf(f, "%s\n", tmpbuf) < 0) {
-      printf("Error: unexpected lines in trait file\n");
-      exit(-1);
+    for(uint32_t j = 0; j < 6; ++j) {
+      if (fscanf(f, "%s\n", tmpbuf) < 0) {
+        printf("Error: unexpected lines in trait file\n");
+        exit(-1);
+      }
     }
-    printf("Token 0: %s", strtok(tmpbuf, " "));
-    for(int j = 0; j < 5; j++) {
-      printf("Token %d: %s", j+1, strtok(NULL, " "));
-    }
-    trait_d[i] = strtod(strtok(NULL, "\t"), NULL);
-    printf("Line %d: %f\n", i, trait_d[i]);
+    trait_d[i] = strtod(tmpbuf, NULL);
   }
   fflush(stdout);
   fclose(f);
@@ -933,18 +930,6 @@ SNPSamplingE::read_trait(string s)
 void
 SNPSamplingE::gcat()
 {
-  // Calculate theta's
-  const double ** const gd = _gamma.const_data();
-  double **theta = _Etheta.data();
-  for (uint32_t n = 0; n < _n; ++n) {
-      double s = .0;
-      for (uint32_t k = 0; k < _k; ++k)
-          s += gd[n][k];
-      assert(s);
-      for (uint32_t k = 0; k < _k; ++k)
-          theta[n][k] = gd[n][k] / s;
-  }
-
   const double ***ld = _lambda.const_data(); // Used to calculate pi
   double *pi = (double *) malloc(_n*sizeof(double)); // Population struct est. at this SNP
 
@@ -974,8 +959,20 @@ SNPSamplingE::gcat()
   _Wo_alt = gsl_matrix_alloc(cols_alt, cols_alt); // Inverted W
   _W_permut_alt = gsl_permutation_alloc(cols_alt);
 
+  // Calculate thetas
+  const double ** const gd = _gamma.const_data();
+  double **theta = _Etheta.data();
+  for (uint32_t n = 0; n < _n; ++n) {
+      double s = .0;
+      for (uint32_t k = 0; k < _k; ++k)
+          s += gd[n][k];
+      assert(s);
+      for (uint32_t k = 0; k < _k; ++k)
+          theta[n][k] = gd[n][k] / s;
+  }
+
+  // Calculate population struct est. at each SNP, run assoc test
   for (uint32_t loc = 0; loc < _l; ++loc) {
-    // Calculate population struct est. at this SNP
     for(uint32_t n = 0; n < _n; ++n) {
       _pi[n] = 0;
     }
@@ -987,7 +984,6 @@ SNPSamplingE::gcat()
         for(uint32_t n = 0; n < _n; ++n)
             _pi[n] += beta*theta[n][k];
     }
-    // Run association test for all indivs at this location
     diff_dev_d[loc] = calc_diff_dev(loc);
   }
 
@@ -1083,8 +1079,6 @@ SNPSamplingE::calc_diff_dev(uint32_t loc) {
 // Calculates deviance of a model using IRLS (iteratively-reweighted least squares)
 double
 SNPSamplingE::calc_dev(bool null_model) {
-  // Deviance of model
-  double dev = 0;
   // Stopping condition
   double max_rel_change;
   double rel_change;
@@ -1155,7 +1149,21 @@ SNPSamplingE::calc_dev(bool null_model) {
         }
       }
     }
+    printf("Printing W\n");
+    for(i = 0; i < X_cols; i++) {
+      for(j = 0; j < X_cols; j++) {
+        printf("%f ", gsl_matrix_get(W, i, j));
+      }
+      printf("\n");
+    }
     gsl_linalg_LU_decomp(W, W_permut, &signum);
+    printf("Printing W decomp\n");
+    for(i = 0; i < X_cols; i++) {
+      for(j = 0; j < X_cols; j++) {
+        printf("%f ", gsl_matrix_get(W, i, j));
+      }
+      printf("\n");
+    }
     gsl_linalg_LU_invert(W, W_permut, Wo);
     // b = b + Wo %*% X*(y-p)
     gsl_vector_set_zero(f);
@@ -1179,7 +1187,9 @@ SNPSamplingE::calc_dev(bool null_model) {
     }
     gsl_vector_memcpy(bl, b);
   }
+
   // Calculate deviance
+  double dev = 0;
   for(i = 0; i < X_rows; i++) {
     y_i = gsl_vector_get(_y_dbl, i);
     p_i = gsl_vector_get(_p, i);
