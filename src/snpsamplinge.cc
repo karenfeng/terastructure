@@ -39,7 +39,7 @@ SNPSamplingE::SNPSamplingE(Env &env, SNP &snp)
    _phidad(_n,_k), _phimom(_n,_k),
    _phinext(_k), _lambdaold(_k,_t),
    _v(_k,_t),
-   _pi(_n),
+   _pi(_n*2),
    _trait(_n),
    _diff_dev(_l),
    _run_gcat(_env.run_gcat)
@@ -930,19 +930,15 @@ SNPSamplingE::read_trait(string s)
 void
 SNPSamplingE::gcat()
 {
-  const double ***ld = _lambda.const_data(); // Used to calculate pi
-  double *pi = (double *) malloc(_n*sizeof(double)); // Population struct est. at this SNP
-
   // Calculate associations over all SNPs
   double *diff_dev_d = _diff_dev.data();
 
   // Initialize vars for IRLS 
-  int n2 = 2*_n;
-  _y_dbl = gsl_vector_alloc(n2); // Doubled genotypes
-  _p = gsl_vector_alloc(n2); // MLE
+  _y_dbl = gsl_vector_alloc(_n*2); // Doubled genotypes
+  _p = gsl_vector_alloc(_n*2); // MLE
   
   int cols_null = 1;
-  _X_null = gsl_matrix_alloc(n2, cols_null); // Intercept
+  _X_null = gsl_matrix_alloc(_n*2, cols_null); // Intercept
   _b_null = gsl_vector_alloc(cols_null); // Beta for null
   _bl_null = gsl_vector_alloc(cols_null); // Beta last for null
   _f_null = gsl_vector_alloc(cols_null);
@@ -951,13 +947,15 @@ SNPSamplingE::gcat()
   _W_permut_null = gsl_permutation_alloc(cols_null);
 
   int cols_alt = cols_null+1;
-  _X_alt = gsl_matrix_alloc(n2, cols_alt); // Intercept and trait
+  _X_alt = gsl_matrix_alloc(_n*2, cols_alt); // Intercept and trait
   _b_alt = gsl_vector_alloc(cols_alt); // Beta for alt
   _bl_alt = gsl_vector_alloc(cols_alt); // Beta last for alt
   _f_alt = gsl_vector_alloc(cols_alt);
   _W_alt = gsl_matrix_alloc(cols_alt, cols_alt);
   _Wo_alt = gsl_matrix_alloc(cols_alt, cols_alt); // Inverted W
   _W_permut_alt = gsl_permutation_alloc(cols_alt);
+
+  const double ***ld = _lambda.const_data(); // Used to calculate pi
 
   // Calculate thetas
   const double ** const gd = _gamma.const_data();
@@ -975,14 +973,17 @@ SNPSamplingE::gcat()
   for (uint32_t loc = 0; loc < _l; ++loc) {
     for(uint32_t n = 0; n < _n; ++n) {
       _pi[n] = 0;
+      _pi[n+_n] = 0;
     }
     for (uint32_t k = 0; k < _k; ++k) {
         double s = .0;
         for (uint32_t t = 0; t < _t; ++t)
             s += ld[loc][k][t];
         double beta = ld[loc][k][0] / s;
-        for(uint32_t n = 0; n < _n; ++n)
+        for(uint32_t n = 0; n < _n; ++n) {
             _pi[n] += beta*theta[n][k];
+            _pi[n+_n] += beta*theta[n][k];
+        }
     }
     diff_dev_d[loc] = calc_diff_dev(loc);
   }
@@ -1027,30 +1028,28 @@ double
 SNPSamplingE::calc_diff_dev(uint32_t loc) {
   // Iteration values
   int i, j;
-  uint32_t n_dbl;
 
   const yval_t ** const snpd = _snp.y().const_data();
   
   // Set values of X
   for(int n = 0; n < _n; n++) {
-    n_dbl = n+_n;
     // Set values of X
     gsl_matrix_set(_X_null, n, 0, 1);
-    gsl_matrix_set(_X_null, n_dbl, 0, 1);
+    gsl_matrix_set(_X_null, n+_n, 0, 1);
     gsl_matrix_set(_X_alt, n, 0, 1);
-    gsl_matrix_set(_X_alt, n_dbl, 0, 1);
+    gsl_matrix_set(_X_alt, n+_n, 0, 1);
     gsl_matrix_set(_X_alt, n, 1, _trait[n]);
-    gsl_matrix_set(_X_alt, n_dbl, 1, _trait[n]);
+    gsl_matrix_set(_X_alt, n+_n, 1, _trait[n]);
     // Double genotype and subtract population structure offset
     if (snpd[n][loc] == 2) {
-      gsl_vector_set(_y_dbl, n, 1.0 - _pi[n]);
-      gsl_vector_set(_y_dbl, n_dbl, 1.0 - _pi[n]);
+      gsl_vector_set(_y_dbl, n, 1.0);
+      gsl_vector_set(_y_dbl, n+_n, 1.0);
     } else if(snpd[n][loc] == 1) {
-      gsl_vector_set(_y_dbl, n, 1.0 - _pi[n]);
-      gsl_vector_set(_y_dbl, n_dbl, 0.0 - _pi[n]);
+      gsl_vector_set(_y_dbl, n, 1.0);
+      gsl_vector_set(_y_dbl, n+_n, 0.0);
     } else if(snpd[n][loc] == 0) {
-      gsl_vector_set(_y_dbl, n, 0.0 - _pi[n]);
-      gsl_vector_set(_y_dbl, n_dbl, 0.0 - _pi[n]);
+      gsl_vector_set(_y_dbl, n, 0.0);
+      gsl_vector_set(_y_dbl, n+_n, 0.0);
     }
   }
 
@@ -1129,6 +1128,7 @@ SNPSamplingE::calc_dev(bool null_model) {
     // p <- as.vector(1/(1 + exp(-X %*% b)))
     gsl_blas_dgemv(CblasNoTrans, -1.0, X, b, 0.0, _p);
     for(i = 0; i < X_rows; i++) {
+      p_i = gsl_vector_get(_p, i) - _pi[i];
       gsl_vector_set(_p, i, 1/(1+exp(gsl_vector_get(_p, i))));
     }
     // var.b <- solve(crossprod(X, p * (1 - p) * X))
