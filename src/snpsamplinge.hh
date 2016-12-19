@@ -106,6 +106,45 @@ private:
 };
 typedef std::map<pthread_t, PhiRunnerE *> ThreadMapE;
 
+class GCATRunner : public Thread {
+public:
+  GCATRunner(const Env &env, gsl_rng **r, 
+       uint32_t n, uint32_t k, 
+       uint32_t loc, uint32_t t, 
+       SNPSamplingE &pop,
+       TSQueue<SNPList> &out_q,
+       TSQueue<pthread_t> &in_q,
+       CondMutex &cm)
+    : _env(env), _r(r),
+      _n(n), _k(k), _loc(loc), _t(t),
+      _pop(pop),
+      _out_q(out_q),
+      _in_q(in_q),
+      _cm(cm),
+      _idptr(NULL)
+  { }
+  ~GCATRunner() { if (_idptr) { delete _idptr; } } 
+
+  int do_work();
+
+private:
+  const Env &_env;
+  gsl_rng **_r;
+
+  uint32_t _n;
+  uint32_t _k;
+  uint32_t _loc;
+  uint32_t _t;
+
+  SNPSamplingE &_pop;
+
+  TSQueue<SNPsList> &_out_q;
+  TSQueue<pthread_t> &_in_q;
+  CondMutex &_cm;
+  pthread_t *_idptr;
+};
+typedef std::map<pthread_t, GCATRunner *> ThreadMapGCAT;
+
 class SNPSamplingE {
 public:
   SNPSamplingE(Env &env, SNP &snp);
@@ -269,6 +308,7 @@ private:
   uint64_t _total_locations;
 
   TSQueue<IndivsList> _out_q;
+  TSQueue<SNPsList> _out_q_snps; // for GCAT
   TSQueue<pthread_t> _in_q;
   CondMutex _cm;
   ThreadMapE _thread_map;

@@ -871,17 +871,16 @@ SNPSamplingE::load_gamma()
 }
 
 // for GCAT
-// TODO: make multithreaded
 void
 SNPSamplingE::split_all_SNPs()
 {
     // split SNPs into _nthread chunks
-    uint32_t chunk_size = (int)(((double)_loc) / _nthreads);
+    uint32_t chunk_size = (int)(((double)_l) / _nthreads);
     uint32_t t = 0, c = 0;
     
     for (uint32_t i = 0; i < _l; ++i) {
         SNPChunkMap::iterator it = _snp_chunk_map.find(t);
-        if (it == _chunk_map.end()) {
+        if (it == _snp_chunk_map.end()) {
             SNPsList *il = new SNPsList;
             _snp_chunk_map[t] = il;
         }
@@ -1149,21 +1148,7 @@ SNPSamplingE::calc_dev(bool null_model) {
         }
       }
     }
-    printf("Printing W\n");
-    for(i = 0; i < X_cols; i++) {
-      for(j = 0; j < X_cols; j++) {
-        printf("%f ", gsl_matrix_get(W, i, j));
-      }
-      printf("\n");
-    }
     gsl_linalg_LU_decomp(W, W_permut, &signum);
-    printf("Printing W decomp\n");
-    for(i = 0; i < X_cols; i++) {
-      for(j = 0; j < X_cols; j++) {
-        printf("%f ", gsl_matrix_get(W, i, j));
-      }
-      printf("\n");
-    }
     gsl_linalg_LU_invert(W, W_permut, Wo);
     // b = b + Wo %*% X*(y-p)
     gsl_vector_set_zero(f);
