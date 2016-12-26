@@ -1047,13 +1047,11 @@ SNPSamplingE::calc_diff_dev(const Array *pi, const gsl_vector *y_dbl,
   gsl_vector *p, logreg_model_t *null_model, logreg_model_t *alt_model)
 {
   // Calculate deviance for null model
-  gsl_vector_set_zero(p);
   run_logreg(pi, y_dbl, p, null_model);
   double dev_null = calc_dev(y_dbl, p);
   // Calculate deviance for alt model
   gsl_vector_set(alt_model->b, 0, gsl_vector_get(null_model->b, 0));
   gsl_vector_set(alt_model->bl, 0, gsl_vector_get(null_model->bl, 0));
-  gsl_vector_set_zero(p);
   run_logreg(pi, y_dbl, p, alt_model);
   double dev_alt = calc_dev(y_dbl, p);
   // Calculate difference in deviance
@@ -1090,6 +1088,7 @@ SNPSamplingE::run_logreg(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p
   gsl_matrix *W = model->W;
   gsl_matrix *Wo = model->Wo;
   gsl_permutation *W_permut = model->W_permut;
+  gsl_vector_set_zero(p);
 
   // Utility sizes
   long X_rows = X->size1;
