@@ -39,7 +39,6 @@ SNPSamplingE::SNPSamplingE(Env &env, SNP &snp)
    _phidad(_n,_k), _phimom(_n,_k),
    _phinext(_k), _lambdaold(_k,_t),
    _v(_k,_t),
-   _pi(_n*2),
    _trait(_n),
    _diff_dev(_l),
    _run_gcat(_env.run_gcat)
@@ -318,7 +317,7 @@ SNPSamplingE::optimize_lambda(uint32_t loc)
   do {
     debug("x = %d", x);
     for (ChunkMap::iterator it = _chunk_map.begin(); 
-	 it != _chunk_map.end(); ++it) {
+      it != _chunk_map.end(); ++it) {
       IndivsList *il = it->second;
       debug("pushing chunk of size %d", il->size());
       _out_q.push(il);
@@ -340,8 +339,8 @@ SNPSamplingE::optimize_lambda(uint32_t loc)
       const double **ldt_t = lambdat.const_data();
       double **ldt = _lambdat.data();
       for (uint32_t k = 0; k < _k; ++k)
-	for (uint32_t r = 0; r < _t; ++r)
-	  ldt[k][r] += ldt_t[k][r];
+        for (uint32_t r = 0; r < _t; ++r)
+          ldt[k][r] += ldt_t[k][r];
       nt++;
     } while (nt != _nthreads || !_in_q.empty());
     
@@ -456,9 +455,46 @@ SNPSamplingE::infer()
     }
   }
   if(_run_gcat) {
-    printf("\nDone with inference. Now running GCAT.\n");
-    gcat();
-    printf("\nDone with GCAT. Now saving difference in deviance.\n");
+    printf("\nDone with inference. Now starting GCAT threads.\n");
+      // Algorithmic constants
+    _max_iter_irls = 10;
+    _tol_irls = 1e-6;
+
+    // Start GCAT threads
+    int rc;
+    void *status;
+    pthread_t threads[_nthreads];
+    pthread_attr_t attr;
+    gcat_thread_info_t thread_info[_nthreads];
+
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+    for(int i = 0; i < _nthreads; i++) {
+      thread_info[i].snpsamplinge = this;
+      thread_info[i].thread_num = i;
+
+      rc = pthread_create(&threads[i], &attr, run_gcat_thread_ptr, (void *)&thread_info[i]);
+      if (rc){
+         printf("\nUnable to create thread.\n");
+         exit(-1);
+      }
+    }
+    printf("\nDone starting GCAT threads. Now running.\n");
+
+    // Join GCAT threads
+    pthread_attr_destroy(&attr);
+    for(int i = 0; i < _nthreads; i++) {
+      rc = pthread_join(threads[i], &status);
+      printf("\nJoined thread %d.\n", i);
+      if (rc){
+         printf("\nUnable to join.\n");
+         exit(-1);
+      }
+    }
+    printf("\nDone with GCAT threads. Now saving difference in deviance.\n");
+
+    // Save differences in deviance
     save_diff_dev();
     printf("\nDone!\n");
   }
@@ -870,31 +906,6 @@ SNPSamplingE::load_gamma()
   fclose(f);
 }
 
-// for GCAT
-void
-SNPSamplingE::split_all_SNPs()
-{
-    // split SNPs into _nthread chunks
-    uint32_t chunk_size = (int)(((double)_l) / _nthreads);
-    uint32_t t = 0, c = 0;
-    
-    for (uint32_t i = 0; i < _l; ++i) {
-        SNPChunkMap::iterator it = _snp_chunk_map.find(t);
-        if (it == _snp_chunk_map.end()) {
-            SNPsList *il = new SNPsList;
-            _snp_chunk_map[t] = il;
-        }
-        SNPsList *il = _snp_chunk_map[t];
-        _snp_chunk_map[t] = il;
-        il->push_back(i);
-        c++;
-        if (c >= chunk_size && t < (uint32_t)_nthreads - 1) {
-            c = 0;
-            t++;
-        }
-    }
-}
-
 int
 SNPSamplingE::read_trait(string s)
 {
@@ -925,150 +936,114 @@ SNPSamplingE::read_trait(string s)
   return 0;
 }
 
-// TODO: make multithreaded!
-void
-SNPSamplingE::gcat()
+static void*
+run_gcat_thread_ptr(void *obj) {
+  gcat_thread_info_t *thread_info = (gcat_thread_info_t *) obj;
+  (thread_info->snpsamplinge)->run_gcat_thread(thread_info->thread_num);
+  pthread_exit(NULL);
+}
+
+void*
+SNPSamplingE::run_gcat_thread(int thread_num)
 {
-  // Calculate associations over all SNPs
-  double *diff_dev_d = _diff_dev.data();
+  double *diff_dev_d = _diff_dev.data(); // Associations
+  const double ** const theta = _Etheta.const_data();
+  double ***ld = _lambda.data();
+  Array pi(_n*2); // Offset
 
-  // Initialize vars for IRLS 
-  _y_dbl = gsl_vector_alloc(_n*2); // Doubled genotypes
-  _p = gsl_vector_alloc(_n*2); // MLE
-  
-  int cols_null = 1;
-  _X_null = gsl_matrix_alloc(_n*2, cols_null); // Intercept
-  _b_null = gsl_vector_alloc(cols_null); // Beta for null
-  _bl_null = gsl_vector_alloc(cols_null); // Beta last for null
-  _f_null = gsl_vector_alloc(cols_null);
-  _W_null = gsl_matrix_alloc(cols_null, cols_null);
-  _Wo_null = gsl_matrix_alloc(cols_null, cols_null); // Inverted W
-  _W_permut_null = gsl_permutation_alloc(cols_null);
-
-  int cols_alt = cols_null+1;
-  _X_alt = gsl_matrix_alloc(_n*2, cols_alt); // Intercept and trait
-  _b_alt = gsl_vector_alloc(cols_alt); // Beta for alt
-  _bl_alt = gsl_vector_alloc(cols_alt); // Beta last for alt
-  _f_alt = gsl_vector_alloc(cols_alt);
-  _W_alt = gsl_matrix_alloc(cols_alt, cols_alt);
-  _Wo_alt = gsl_matrix_alloc(cols_alt, cols_alt); // Inverted W
-  _W_permut_alt = gsl_permutation_alloc(cols_alt);
-
-  const double ***ld = _lambda.const_data(); // Used to calculate pi
-
-  // Calculate thetas
-  const double ** const gd = _gamma.const_data();
-  double **theta = _Etheta.data();
-  for (uint32_t n = 0; n < _n; ++n) {
-      double s = .0;
-      for (uint32_t k = 0; k < _k; ++k)
-          s += gd[n][k];
-      assert(s);
-      for (uint32_t k = 0; k < _k; ++k)
-          theta[n][k] = gd[n][k] / s;
-  }
+  // For GCAT
+  gsl_vector *y_dbl = gsl_vector_alloc(_n*2); // Doubled genotypes
+  gsl_vector *p = gsl_vector_alloc(_n*2); // MLE
+  // Null model
+  int covs_null = 1;
+  logreg_model_t null_model = (logreg_model_t) {gsl_matrix_alloc(_n*2, covs_null),
+    gsl_vector_alloc(covs_null), gsl_vector_alloc(covs_null), gsl_vector_alloc(covs_null),
+    gsl_matrix_alloc(covs_null, covs_null), gsl_matrix_alloc(covs_null, covs_null),
+    gsl_permutation_alloc(covs_null)};
+  // Alt model: includes trait
+  int covs_alt = covs_null+1;
+  logreg_model_t alt_model = (logreg_model_t) {gsl_matrix_alloc(_n*2, covs_alt),
+    gsl_vector_alloc(covs_alt), gsl_vector_alloc(covs_alt), gsl_vector_alloc(covs_alt),
+    gsl_matrix_alloc(covs_alt, covs_alt), gsl_matrix_alloc(covs_alt, covs_alt),
+    gsl_permutation_alloc(covs_alt)};
 
   // Calculate population struct est. at each SNP, run assoc test
-  for (uint32_t loc = 0; loc < _l; ++loc) {
-    for(uint32_t n = 0; n < _n; ++n) {
-      _pi[n] = 0;
-      _pi[n+_n] = 0;
-    }
+  uint32_t first_loc = thread_num * _l/_nthreads;
+  uint32_t last_loc = (thread_num+1) * _l/_nthreads;
+  for (uint32_t loc = first_loc; loc < last_loc; ++loc) {
+    pi.zero();
     for (uint32_t k = 0; k < _k; ++k) {
         double s = .0;
         for (uint32_t t = 0; t < _t; ++t)
             s += ld[loc][k][t];
         double beta = ld[loc][k][0] / s;
         for(uint32_t n = 0; n < _n; ++n) {
-            _pi[n] += beta*theta[n][k];
-            _pi[n+_n] += beta*theta[n][k];
+            pi[n] += beta*theta[n][k];
+            pi[n+_n] += beta*theta[n][k];
         }
     }
-    diff_dev_d[loc] = calc_diff_dev(loc);
+    diff_dev_d[loc] = calc_diff_dev(loc, &pi, y_dbl, p, &null_model, &alt_model);
   }
 
   // Clean up
-  gsl_vector_free(_y_dbl);
-  gsl_vector_free(_p);
-
-  gsl_matrix_free(_X_null); 
-  gsl_vector_free(_b_null);
-  gsl_vector_free(_bl_null);
-  gsl_vector_free(_f_null);
-  gsl_matrix_free(_W_null);
-  gsl_matrix_free(_Wo_null);
-  gsl_permutation_free(_W_permut_null);
-
-  gsl_matrix_free(_X_alt); 
-  gsl_vector_free(_b_alt);
-  gsl_vector_free(_bl_alt);
-  gsl_vector_free(_f_alt);
-  gsl_matrix_free(_W_alt);
-  gsl_matrix_free(_Wo_alt);
-  gsl_permutation_free(_W_permut_alt);
+  gsl_vector_free(y_dbl);
+  gsl_vector_free(p);
+  gsl_matrix_free(null_model.X); 
+  gsl_vector_free(null_model.b);
+  gsl_vector_free(null_model.bl);
+  gsl_vector_free(null_model.f);
+  gsl_matrix_free(null_model.W);
+  gsl_matrix_free(null_model.Wo);
+  gsl_permutation_free(null_model.W_permut);
+  gsl_matrix_free(alt_model.X); 
+  gsl_vector_free(alt_model.b);
+  gsl_vector_free(alt_model.bl);
+  gsl_vector_free(alt_model.f);
+  gsl_matrix_free(alt_model.W);
+  gsl_matrix_free(alt_model.Wo);
+  gsl_permutation_free(alt_model.W_permut);
 }
 
-void
-SNPSamplingE::save_diff_dev()
-{
-  FILE *f = fopen(add_iter_suffix("/diffDev").c_str(), "w");
-  if (!f)  {
-    lerr("cannot open diffDev file:%s\n",  strerror(errno));
-    exit(-1);
-  }
-  for (uint32_t loc = 0; loc < _l; ++loc)
-    fprintf(f, "%.8f\n", _diff_dev[loc]);
-  fclose(f);
-}
-
-// TODO: allow for user-inputted covariates
-// Runs GCAT on one SNP location
 double
-SNPSamplingE::calc_diff_dev(uint32_t loc) {
-  // Iteration values
+SNPSamplingE::calc_diff_dev(uint32_t loc, Array *pi, gsl_vector *y_dbl, gsl_vector *p,
+  logreg_model_t *null_model, logreg_model_t *alt_model)
+{
   int i, j;
-
   const yval_t ** const snpd = _snp.y().const_data();
   
-  // Set values of X
   for(int n = 0; n < _n; n++) {
-    // Set values of X
-    gsl_matrix_set(_X_null, n, 0, 1);
-    gsl_matrix_set(_X_null, n+_n, 0, 1);
-    gsl_matrix_set(_X_alt, n, 0, 1);
-    gsl_matrix_set(_X_alt, n+_n, 0, 1);
-    gsl_matrix_set(_X_alt, n, 1, _trait[n]);
-    gsl_matrix_set(_X_alt, n+_n, 1, _trait[n]);
+    gsl_matrix_set(null_model->X, n, 0, 1);
+    gsl_matrix_set(null_model->X, n+_n, 0, 1);
+    gsl_matrix_set(alt_model->X, n, 0, 1);
+    gsl_matrix_set(alt_model->X, n+_n, 0, 1);
+    gsl_matrix_set(alt_model->X, n, 1, _trait[n]);
+    gsl_matrix_set(alt_model->X, n+_n, 1, _trait[n]);
     // Double genotype and subtract population structure offset
     if (snpd[n][loc] == 2) {
-      gsl_vector_set(_y_dbl, n, 1.0);
-      gsl_vector_set(_y_dbl, n+_n, 1.0);
+      gsl_vector_set(y_dbl, n, 1.0);
+      gsl_vector_set(y_dbl, n+_n, 1.0);
     } else if(snpd[n][loc] == 1) {
-      gsl_vector_set(_y_dbl, n, 1.0);
-      gsl_vector_set(_y_dbl, n+_n, 0.0);
+      gsl_vector_set(y_dbl, n, 1.0);
+      gsl_vector_set(y_dbl, n+_n, 0.0);
     } else if(snpd[n][loc] == 0) {
-      gsl_vector_set(_y_dbl, n, 0.0);
-      gsl_vector_set(_y_dbl, n+_n, 0.0);
+      gsl_vector_set(y_dbl, n, 0.0);
+      gsl_vector_set(y_dbl, n+_n, 0.0);
     }
   }
+  gsl_vector_set_zero(null_model->b);
+  gsl_vector_set_zero(null_model->bl);
 
-  gsl_vector_set_zero(_b_null);
-  gsl_vector_set_zero(_bl_null);
-
-  // Algorithmic constants
-  _max_iter_irls = 10;
-  _tol_irls = 1e-6;
   // Calculate deviance for null model
-  double dev_null = calc_dev(true);
+  double dev_null = calc_dev(pi, y_dbl, p, null_model);
 
   // Set b_alt
-  gsl_vector_set(_b_alt, 0, gsl_vector_get(_b_null, 0));
-  gsl_vector_set(_bl_alt, 0, gsl_vector_get(_bl_null, 0));
-  gsl_vector_set(_b_alt, 1, 0);
-  gsl_vector_set(_bl_alt, 1, 0);
+  gsl_vector_set(alt_model->b, 0, gsl_vector_get(null_model->b, 0));
+  gsl_vector_set(alt_model->bl, 0, gsl_vector_get(null_model->bl, 0));
+  gsl_vector_set(alt_model->b, 1, 0);
+  gsl_vector_set(alt_model->bl, 1, 0);
 
   // Calculate deviance for alt model
-  double dev_alt = calc_dev(false);
+  double dev_alt = calc_dev(pi, y_dbl, p, alt_model);
 
   double diff_dev = -2*(dev_null - dev_alt);
   return diff_dev;
@@ -1076,7 +1051,9 @@ SNPSamplingE::calc_diff_dev(uint32_t loc) {
 
 // Calculates deviance of a model using IRLS (iteratively-reweighted least squares)
 double
-SNPSamplingE::calc_dev(bool null_model) {
+SNPSamplingE::calc_dev(Array *pi, gsl_vector *y_dbl, gsl_vector *p,
+  logreg_model_t *model) {
+
   // Stopping condition
   double max_rel_change;
   double rel_change;
@@ -1089,53 +1066,37 @@ SNPSamplingE::calc_dev(bool null_model) {
   double p_i, p_k;
   double w_ij;
 
-  gsl_matrix *X;
-  gsl_vector *b;
-  gsl_vector *bl;
-  gsl_vector *f;
-  gsl_matrix *W;
-  gsl_matrix *Wo; // Inverted W
-  gsl_permutation *W_permut;
-  if (null_model) {
-    X = _X_null;
-    b = _b_null;
-    bl = _bl_null;
-    f = _f_null;
-    W = _W_null;
-    Wo = _Wo_null;
-    W_permut = _W_permut_null;
-  } else {
-    X = _X_alt;
-    b = _b_alt;
-    bl = _bl_alt;
-    f = _f_alt;
-    W = _W_alt;
-    Wo = _Wo_alt;
-    W_permut = _W_permut_alt;
-  }
+  gsl_matrix *X = model->X;
+  gsl_vector *b = model->b;
+  gsl_vector *bl = model->bl;
+  gsl_vector *f = model->f;
+  gsl_matrix *W = model->W;
+  gsl_matrix *Wo = model->Wo;
+  gsl_permutation *W_permut = model->W_permut;
+
   // Utility sizes
   long X_rows = X->size1;
   long X_cols = X->size2;
 
-  // TODO: SET ALL VECTS ETC. TO 0S
-  gsl_vector_set_zero(_p);
+  // Reset GSL variables
+  gsl_vector_set_zero(p);
   gsl_vector_set_zero(f);
   gsl_matrix_set_zero(Wo);
   gsl_permutation_init(W_permut);
   
   for(n_iter = 0; n_iter < _max_iter_irls; n_iter++) {
     // p <- as.vector(1/(1 + exp(-X %*% b)))
-    gsl_blas_dgemv(CblasNoTrans, -1.0, X, b, 0.0, _p);
+    gsl_blas_dgemv(CblasNoTrans, -1.0, X, b, 0.0, p);
     for(i = 0; i < X_rows; i++) {
-      p_i = gsl_vector_get(_p, i) - _pi[i];
-      gsl_vector_set(_p, i, 1/(1+exp(gsl_vector_get(_p, i))));
+      p_i = gsl_vector_get(p, i) - (*pi)[i];
+      gsl_vector_set(p, i, 1/(1+exp(gsl_vector_get(p, i))));
     }
     // var.b <- solve(crossprod(X, p * (1 - p) * X))
     gsl_matrix_set_zero(W);
     for(i = 0; i < X_cols; i++) {
       for(j = i; j < X_cols; j++) {
         for(k = 0; k < X_rows; k++) {
-          p_k = gsl_vector_get(_p, k);
+          p_k = gsl_vector_get(p, k);
           w_ij = gsl_matrix_get(W, i, j) +
             (gsl_matrix_get(X, k, i) *
             gsl_matrix_get(X, k, j) *
@@ -1154,7 +1115,8 @@ SNPSamplingE::calc_dev(bool null_model) {
     gsl_vector_set_zero(f);
     for(i = 0; i < X_cols; i++) {
       for(j = 0; j < X_rows; j++) {
-        gsl_vector_set(f, i, gsl_vector_get(f, i) + gsl_matrix_get(X, j, i) * (gsl_vector_get(_y_dbl, j) - gsl_vector_get(_p, j)));
+        gsl_vector_set(f, i, gsl_vector_get(f, i) + gsl_matrix_get(X, j, i) *
+          (gsl_vector_get(y_dbl, j) - gsl_vector_get(p, j)));
       }
     }
     gsl_blas_dgemv(CblasNoTrans, 1.0, Wo, f, 1.0, b);
@@ -1176,10 +1138,23 @@ SNPSamplingE::calc_dev(bool null_model) {
   // Calculate deviance
   double dev = 0;
   for(i = 0; i < X_rows; i++) {
-    y_i = gsl_vector_get(_y_dbl, i);
-    p_i = gsl_vector_get(_p, i);
+    y_i = gsl_vector_get(y_dbl, i);
+    p_i = gsl_vector_get(p, i);
     dev += (y_i * log(p_i)) + ((1-y_i)*log(1-p_i));
   }
 
   return dev;
+}
+
+void
+SNPSamplingE::save_diff_dev()
+{
+  FILE *f = fopen(add_iter_suffix("/diffDev").c_str(), "w");
+  if (!f)  {
+    lerr("cannot open diffDev file:%s\n",  strerror(errno));
+    exit(-1);
+  }
+  for (uint32_t loc = 0; loc < _l; ++loc)
+    fprintf(f, "%.8f\n", _diff_dev[loc]);
+  fclose(f);
 }

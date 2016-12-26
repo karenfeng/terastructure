@@ -24,9 +24,6 @@
 typedef vector<uint32_t> IndivsList;
 typedef std::map<uint32_t, IndivsList *> ChunkMap;
 
-typedef vector<uint32_t> SNPsList; // for GCAT
-typedef std::map<uint32_t, SNPsList *> SNPChunkMap; // for GCAT
-
 class SNPSamplingE;
 class PhiRunnerE : public Thread {
 public:
@@ -106,45 +103,6 @@ private:
 };
 typedef std::map<pthread_t, PhiRunnerE *> ThreadMapE;
 
-class GCATRunner : public Thread {
-public:
-  GCATRunner(const Env &env, gsl_rng **r, 
-       uint32_t n, uint32_t k, 
-       uint32_t loc, uint32_t t, 
-       SNPSamplingE &pop,
-       TSQueue<SNPList> &out_q,
-       TSQueue<pthread_t> &in_q,
-       CondMutex &cm)
-    : _env(env), _r(r),
-      _n(n), _k(k), _loc(loc), _t(t),
-      _pop(pop),
-      _out_q(out_q),
-      _in_q(in_q),
-      _cm(cm),
-      _idptr(NULL)
-  { }
-  ~GCATRunner() { if (_idptr) { delete _idptr; } } 
-
-  int do_work();
-
-private:
-  const Env &_env;
-  gsl_rng **_r;
-
-  uint32_t _n;
-  uint32_t _k;
-  uint32_t _loc;
-  uint32_t _t;
-
-  SNPSamplingE &_pop;
-
-  TSQueue<SNPsList> &_out_q;
-  TSQueue<pthread_t> &_in_q;
-  CondMutex &_cm;
-  pthread_t *_idptr;
-};
-typedef std::map<pthread_t, GCATRunner *> ThreadMapGCAT;
-
 class SNPSamplingE {
 public:
   SNPSamplingE(Env &env, SNP &snp);
@@ -177,8 +135,22 @@ public:
   const double rho_indiv(uint32_t n) const { return _rho_indiv[n]; }
 
   // For GCAT
+  struct logreg_model_t {
+    gsl_matrix *X; // Intercept
+    gsl_vector *b; // Beta
+    gsl_vector *bl; // Beta last
+    gsl_vector *f;
+    gsl_matrix *W;
+    gsl_matrix *Wo; // Inverted W
+    gsl_permutation *W_permut;
+  };
   int read_trait(string s);
   void infer_assoc();
+  void *run_gcat_thread(int thread_num);
+  double calc_diff_dev(uint32_t loc, Array *pi, gsl_vector *y_dbl, gsl_vector *p,
+    logreg_model_t *null_model, logreg_model_t *alt_model);
+  double calc_dev(Array *pi, gsl_vector *y_dbl, gsl_vector *p, logreg_model_t *model);
+  void save_diff_dev();
 
 private:
   void init_heldout_sets();
@@ -232,16 +204,6 @@ private:
   void estimate_theta(uint32_t n, Array &theta) const;
   void estimate_all_theta();
   string add_iter_suffix(const char *c);
-
-  // For GCAT
-  void split_all_SNPs();
-  void infer_without_save();
-  void gcat();
-  void assoc();
-  void save_diff_dev();
-  void read_trait();
-  double calc_dev(bool null_model);
-  double calc_diff_dev(uint32_t loc);
 
   Env &_env;
   SNP &_snp;
@@ -308,12 +270,10 @@ private:
   uint64_t _total_locations;
 
   TSQueue<IndivsList> _out_q;
-  TSQueue<SNPsList> _out_q_snps; // for GCAT
   TSQueue<pthread_t> _in_q;
   CondMutex _cm;
   ThreadMapE _thread_map;
   ChunkMap _chunk_map;
-  SNPChunkMap _snp_chunk_map; // for GCAT
   BoolMap64 _cthreads;
   bool _hol_mode;
 
@@ -327,34 +287,16 @@ private:
   bool _run_gcat;
   TraitArray _trait;
   DiffDevArray _diff_dev;
-
-  gsl_vector *_p; // MLE
-  gsl_vector *_y_dbl; // Doubled genotypes
-
-  // Null model
-  gsl_matrix *_X_null;
-  gsl_vector *_b_null;
-  gsl_vector *_bl_null;
-  gsl_vector *_f_null;
-  gsl_matrix *_W_null;
-  gsl_matrix *_Wo_null;
-  gsl_permutation *_W_permut_null;
-
-  // Alt model
-  gsl_matrix *_X_alt;
-  gsl_vector *_b_alt;
-  gsl_vector *_bl_alt;
-  gsl_vector *_f_alt;
-  gsl_matrix *_W_alt;
-  gsl_matrix *_Wo_alt;
-  gsl_permutation *_W_permut_alt;
-
-  Array _pi;
-
-  // Constants for IRLS
   int _max_iter_irls;
   double _tol_irls;
 };
+
+struct gcat_thread_info_t {
+  SNPSamplingE *snpsamplinge;
+  int thread_num;
+};
+
+static void *run_gcat_thread_ptr(void *obj);
 
 inline void
 PhiRunnerE::reset(uint32_t loc)
