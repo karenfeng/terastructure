@@ -149,7 +149,8 @@ public:
   void *run_gcat_thread(const int thread_num);
   double calc_diff_dev(const Array *pi, const gsl_vector *y_dbl,
     gsl_vector *p, logreg_model_t *null_model, logreg_model_t *alt_model);
-  double calc_dev(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p,
+  double calc_dev(const gsl_vector *y_dbl, const gsl_vector *p);
+  void run_logreg(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p,
     logreg_model_t *model);
   void save_diff_dev();
 
