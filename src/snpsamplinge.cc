@@ -3,6 +3,8 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <math.h>
+#include <algorithm>
 #include <sys/time.h>
 #include <gsl/gsl_histogram.h>
 #include <gsl/gsl_blas.h>
@@ -455,7 +457,7 @@ SNPSamplingE::infer()
     }
   }
   if(_run_gcat) {
-    printf("\nDone with inference. Now starting GCAT threads.\n");
+    printf("\nStarting GCAT at %d secs.\n", duration());
       // Algorithmic constants
     _max_iter_irls = 10;
     _tol_irls = 1e-6;
@@ -480,24 +482,24 @@ SNPSamplingE::infer()
          exit(-1);
       }
     }
-    printf("\nDone starting GCAT threads. Now running.\n");
+    printf("Done starting GCAT threads. Now running.\n");
 
     // Join GCAT threads
     pthread_attr_destroy(&attr);
     for(int i = 0; i < _nthreads; i++) {
       rc = pthread_join(threads[i], &status);
-      printf("\nJoined thread %d.\n", i);
       if (rc){
          printf("\nUnable to join.\n");
          exit(-1);
       }
     }
-    printf("\nDone with GCAT threads. Now saving difference in deviance.\n");
+    printf("Done with GCAT threads at %d secs. Saving difference in deviance.\n", duration());
 
     // Save differences in deviance
     save_diff_dev();
-    printf("\nDone!\n");
+    printf("Done!\n");
   }
+  exit(0);
 }
 
 double
@@ -968,8 +970,10 @@ SNPSamplingE::run_gcat_thread(int thread_num)
     gsl_permutation_alloc(covs_alt)};
 
   // Calculate population struct est. at each SNP, run assoc test
-  uint32_t first_loc = thread_num * _l/_nthreads;
-  uint32_t last_loc = (thread_num+1) * _l/_nthreads;
+  uint32_t num_loc_per_thread = (uint32_t) ceil(((double)_l)/_nthreads);
+  uint32_t first_loc = thread_num * num_loc_per_thread;
+  uint32_t last_loc = min((thread_num+1) * num_loc_per_thread, (uint32_t) _l);
+  printf("Total l %d, thread %d: first %d last %d\n", _l, thread_num, first_loc, last_loc);
   for (uint32_t loc = first_loc; loc < last_loc; ++loc) {
     pi.zero();
     for (uint32_t k = 0; k < _k; ++k) {
