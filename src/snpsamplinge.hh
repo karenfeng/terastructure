@@ -146,10 +146,11 @@ public:
   };
   int read_trait(string s);
   void infer_assoc();
-  void *run_gcat_thread(int thread_num);
-  double calc_diff_dev(uint32_t loc, Array *pi, gsl_vector *y_dbl, gsl_vector *p,
-    logreg_model_t *null_model, logreg_model_t *alt_model);
-  double calc_dev(Array *pi, gsl_vector *y_dbl, gsl_vector *p, logreg_model_t *model);
+  void *run_gcat_thread(const int thread_num);
+  double calc_diff_dev(const Array *pi, const gsl_vector *y_dbl,
+    gsl_vector *p, logreg_model_t *null_model, logreg_model_t *alt_model);
+  double calc_dev(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p,
+    logreg_model_t *model);
   void save_diff_dev();
 
 private:

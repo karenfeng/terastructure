@@ -946,14 +946,15 @@ run_gcat_thread_ptr(void *obj) {
 }
 
 void*
-SNPSamplingE::run_gcat_thread(int thread_num)
+SNPSamplingE::run_gcat_thread(const int thread_num)
 {
-  double *diff_dev_d = _diff_dev.data(); // Associations
+  double *diff_dev_d = _diff_dev.data(); // Association
   const double ** const theta = _Etheta.const_data();
-  double ***ld = _lambda.data();
+  const double ***ld = _lambda.const_data();
   Array pi(_n*2); // Offset
 
   // For GCAT
+  const yval_t ** const snpd = _snp.y().const_data();
   gsl_vector *y_dbl = gsl_vector_alloc(_n*2); // Doubled genotypes
   gsl_vector *p = gsl_vector_alloc(_n*2); // MLE
   // Null model
@@ -986,7 +987,29 @@ SNPSamplingE::run_gcat_thread(int thread_num)
             pi[n+_n] += beta*theta[n][k];
         }
     }
-    diff_dev_d[loc] = calc_diff_dev(loc, &pi, y_dbl, p, &null_model, &alt_model);
+    // Set b, bl, X, y_dbl
+    gsl_vector_set_zero(null_model.b);
+    gsl_vector_set_zero(null_model.bl);
+    gsl_vector_set_zero(alt_model.b);
+    gsl_vector_set_zero(alt_model.bl);
+    gsl_matrix_set_all(null_model.X, 1);
+    gsl_matrix_set_all(alt_model.X, 1);
+    for(int n = 0; n < _n; n++) {
+      gsl_matrix_set(alt_model.X, n, 1, _trait[n]);
+      gsl_matrix_set(alt_model.X, n+_n, 1, _trait[n]);
+      // Double genotype and subtract population structure offset
+      if (snpd[n][loc] == 2) {
+        gsl_vector_set(y_dbl, n, 1.0);
+        gsl_vector_set(y_dbl, n+_n, 1.0);
+      } else if(snpd[n][loc] == 1) {
+        gsl_vector_set(y_dbl, n, 1.0);
+        gsl_vector_set(y_dbl, n+_n, 0.0);
+      } else if(snpd[n][loc] == 0) {
+        gsl_vector_set(y_dbl, n, 0.0);
+        gsl_vector_set(y_dbl, n+_n, 0.0);
+      }
+    }
+    diff_dev_d[loc] = calc_diff_dev(&pi, y_dbl, p, &null_model, &alt_model);
   }
 
   // Clean up
@@ -1009,55 +1032,25 @@ SNPSamplingE::run_gcat_thread(int thread_num)
 }
 
 double
-SNPSamplingE::calc_diff_dev(uint32_t loc, Array *pi, gsl_vector *y_dbl, gsl_vector *p,
-  logreg_model_t *null_model, logreg_model_t *alt_model)
+SNPSamplingE::calc_diff_dev(const Array *pi, const gsl_vector *y_dbl,
+  gsl_vector *p, logreg_model_t *null_model, logreg_model_t *alt_model)
 {
-  int i, j;
-  const yval_t ** const snpd = _snp.y().const_data();
-  
-  for(int n = 0; n < _n; n++) {
-    gsl_matrix_set(null_model->X, n, 0, 1);
-    gsl_matrix_set(null_model->X, n+_n, 0, 1);
-    gsl_matrix_set(alt_model->X, n, 0, 1);
-    gsl_matrix_set(alt_model->X, n+_n, 0, 1);
-    gsl_matrix_set(alt_model->X, n, 1, _trait[n]);
-    gsl_matrix_set(alt_model->X, n+_n, 1, _trait[n]);
-    // Double genotype and subtract population structure offset
-    if (snpd[n][loc] == 2) {
-      gsl_vector_set(y_dbl, n, 1.0);
-      gsl_vector_set(y_dbl, n+_n, 1.0);
-    } else if(snpd[n][loc] == 1) {
-      gsl_vector_set(y_dbl, n, 1.0);
-      gsl_vector_set(y_dbl, n+_n, 0.0);
-    } else if(snpd[n][loc] == 0) {
-      gsl_vector_set(y_dbl, n, 0.0);
-      gsl_vector_set(y_dbl, n+_n, 0.0);
-    }
-  }
-  gsl_vector_set_zero(null_model->b);
-  gsl_vector_set_zero(null_model->bl);
-
   // Calculate deviance for null model
   double dev_null = calc_dev(pi, y_dbl, p, null_model);
-
   // Set b_alt
   gsl_vector_set(alt_model->b, 0, gsl_vector_get(null_model->b, 0));
   gsl_vector_set(alt_model->bl, 0, gsl_vector_get(null_model->bl, 0));
-  gsl_vector_set(alt_model->b, 1, 0);
-  gsl_vector_set(alt_model->bl, 1, 0);
-
   // Calculate deviance for alt model
   double dev_alt = calc_dev(pi, y_dbl, p, alt_model);
-
   double diff_dev = -2*(dev_null - dev_alt);
   return diff_dev;
 }
 
 // Calculates deviance of a model using IRLS (iteratively-reweighted least squares)
 double
-SNPSamplingE::calc_dev(Array *pi, gsl_vector *y_dbl, gsl_vector *p,
-  logreg_model_t *model) {
-
+SNPSamplingE::calc_dev(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p,
+  logreg_model_t *model)
+{
   // Stopping condition
   double max_rel_change;
   double rel_change;
@@ -1158,7 +1151,9 @@ SNPSamplingE::save_diff_dev()
     lerr("cannot open diffDev file:%s\n",  strerror(errno));
     exit(-1);
   }
+  const double *diff_dev_d = _diff_dev.const_data(); // Associations
+
   for (uint32_t loc = 0; loc < _l; ++loc)
-    fprintf(f, "%.8f\n", _diff_dev[loc]);
+    fprintf(f, "%.8f\n", diff_dev_d[loc]);
   fclose(f);
 }
