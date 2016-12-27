@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <cstdatomic>
 
 #include "env.hh"
 #include "matrix.hh"
@@ -147,11 +148,11 @@ public:
   int read_trait(string s);
   void infer_assoc();
   void *run_gcat_thread(const int thread_num);
-  double calc_diff_dev(const Array *pi, const gsl_vector *y_dbl,
+  double calc_diff_dev(const gsl_vector *pi, const gsl_vector *y_dbl,
     gsl_vector *p, logreg_model_t *null_model, logreg_model_t *alt_model);
   double calc_dev(const gsl_vector *y_dbl, const gsl_vector *p);
-  void run_logreg(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p,
-    logreg_model_t *model);
+  void run_logreg(const gsl_vector *pi, const gsl_vector *y_dbl,
+    gsl_vector *p, logreg_model_t *model);
   void save_diff_dev();
 
 private:
@@ -291,6 +292,7 @@ private:
   DiffDevArray _diff_dev;
   const int _max_iter_irls;
   const double _tol_irls;
+  atomic<long> _locs_tested; // Progress across all threads
 };
 
 struct gcat_thread_info_t {
