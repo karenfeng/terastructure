@@ -289,8 +289,8 @@ private:
   bool _run_gcat;
   TraitArray _trait;
   DiffDevArray _diff_dev;
-  int _max_iter_irls;
-  double _tol_irls;
+  const int _max_iter_irls;
+  const double _tol_irls;
 };
 
 struct gcat_thread_info_t {

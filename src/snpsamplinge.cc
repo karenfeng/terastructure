@@ -43,7 +43,9 @@ SNPSamplingE::SNPSamplingE(Env &env, SNP &snp)
    _v(_k,_t),
    _trait(_n),
    _diff_dev(_l),
-   _run_gcat(_env.run_gcat)
+   _run_gcat(_env.run_gcat),
+   _max_iter_irls(10),
+    _tol_irls(1e-6)
 {
   printf("+ initialization begin\n");
   fflush(stdout);
@@ -458,9 +460,6 @@ SNPSamplingE::infer()
   }
   if(_run_gcat) {
     printf("\nStarting GCAT at %d secs.\n", duration());
-      // Algorithmic constants
-    _max_iter_irls = 10;
-    _tol_irls = 1e-6;
 
     // Start GCAT threads
     int rc;
@@ -982,7 +981,6 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
   uint32_t num_loc_per_thread = (uint32_t) ceil(((double)_l)/_nthreads);
   uint32_t first_loc = thread_num * num_loc_per_thread;
   uint32_t last_loc = min((thread_num+1) * num_loc_per_thread, (uint32_t) _l);
-  printf("Total l %d, thread %d: first %d last %d\n", _l, thread_num, first_loc, last_loc);
   for (uint32_t loc = first_loc; loc < last_loc; ++loc) {
     // Pop struct-predicted genotype vect
     pi.zero();
@@ -1015,6 +1013,10 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
         gsl_vector_set(y_dbl, n, 1.0);
         gsl_vector_set(y_dbl, n+_n, 0.0);
       } else if(snpd[n][loc] == 0) {
+        gsl_vector_set(y_dbl, n, 0.0);
+        gsl_vector_set(y_dbl, n+_n, 0.0);
+      } else {
+        // Missing genotype data
         gsl_vector_set(y_dbl, n, 0.0);
         gsl_vector_set(y_dbl, n+_n, 0.0);
       }
@@ -1056,14 +1058,16 @@ SNPSamplingE::calc_diff_dev(const Array *pi, const gsl_vector *y_dbl,
   double dev_alt = calc_dev(y_dbl, p);
   // Calculate difference in deviance
   double diff_dev = -2*(dev_null - dev_alt);
+
   return diff_dev;
 }
 
 // Calculate deviance
-double SNPSamplingE::calc_dev(const gsl_vector *y_dbl, const gsl_vector *p)
+double
+SNPSamplingE::calc_dev(const gsl_vector *y_dbl, const gsl_vector *p)
 {
   double dev = 0;
-  for(int i = 0; i < y_dbl->size; i++) {
+  for(long i = 0; i < y_dbl->size; i++) {
     double y_i = gsl_vector_get(y_dbl, i);
     double p_i = gsl_vector_get(p, i);
     dev += (y_i * log(p_i)) + ((1-y_i)*log(1-p_i));
@@ -1097,15 +1101,15 @@ SNPSamplingE::run_logreg(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p
   for(int n_iter = 0; n_iter < _max_iter_irls; n_iter++) {
     // p <- as.vector(1/(1 + exp(-X %*% b)))
     gsl_blas_dgemv(CblasNoTrans, -1.0, X, b, 0.0, p);
-    for(int i = 0; i < X_rows; i++) {
+    for(long i = 0; i < X_rows; i++) {
       double p_i = gsl_vector_get(p, i) - (*pi)[i];
       gsl_vector_set(p, i, 1/(1+exp(gsl_vector_get(p, i))));
     }
     // var.b <- solve(crossprod(X, p * (1 - p) * X))
     gsl_matrix_set_zero(W);
-    for(int i = 0; i < X_cols; i++) {
-      for(int j = i; j < X_cols; j++) {
-        for(int k = 0; k < X_rows; k++) {
+    for(long i = 0; i < X_cols; i++) {
+      for(long j = i; j < X_cols; j++) {
+        for(long k = 0; k < X_rows; k++) {
           double p_k = gsl_vector_get(p, k);
           double w_ij = gsl_matrix_get(W, i, j) +
             (gsl_matrix_get(X, k, i) *
@@ -1123,8 +1127,8 @@ SNPSamplingE::run_logreg(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p
     gsl_linalg_LU_invert(W, W_permut, Wo);
     // b = b + Wo %*% X*(y-p)
     gsl_vector_set_zero(f);
-    for(int i = 0; i < X_cols; i++) {
-      for(int j = 0; j < X_rows; j++) {
+    for(long i = 0; i < X_cols; i++) {
+      for(long j = 0; j < X_rows; j++) {
         gsl_vector_set(f, i, gsl_vector_get(f, i) + gsl_matrix_get(X, j, i) *
           (gsl_vector_get(y_dbl, j) - gsl_vector_get(p, j)));
       }
@@ -1132,7 +1136,7 @@ SNPSamplingE::run_logreg(const Array *pi, const gsl_vector *y_dbl, gsl_vector *p
     gsl_blas_dgemv(CblasNoTrans, 1.0, Wo, f, 1.0, b);
     // Stopping condition
     max_rel_change = 0;
-    for(int i = 0; i < X_cols; i++) {
+    for(long i = 0; i < X_cols; i++) {
       double bl_i = gsl_vector_get(bl, i);
       rel_change = fabs(gsl_vector_get(b, i) - bl_i) / (fabs(bl_i) + 0.01*_tol_irls);
       if (rel_change > max_rel_change) {
