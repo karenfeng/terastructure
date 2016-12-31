@@ -477,7 +477,7 @@ SNPSamplingE::infer()
       thread_info[i].thread_num = i;
 
       rc = pthread_create(&threads[i], &attr, run_gcat_thread_ptr, (void *)&thread_info[i]);
-      if (rc){
+      if (rc) {
          printf("\nUnable to create thread.\n");
          exit(-1);
       }
@@ -486,8 +486,8 @@ SNPSamplingE::infer()
     pthread_attr_destroy(&attr);
     for(int i = 0; i < _nthreads; i++) {
       rc = pthread_join(threads[i], &status);
-      if (rc){
-         printf("\nUnable to join.\n");
+      if (rc) {
+         printf("\nUnable to join thread.\n");
          exit(-1);
       }
     }
@@ -947,8 +947,8 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
 {
   double *diff_dev_d = _diff_dev.data();
   // For calculating offset (pi)
+  const double ***ld = _lambda.const_data();
   const double ** const theta = _Etheta.const_data();
-  const double *** const ld = _lambda.const_data();
   // For calculating the genotype vector (y_dbl)
   const yval_t ** const snpd = _snp.y().const_data();
   // Null model
@@ -978,22 +978,23 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
   for (uint32_t loc = first_loc; loc < last_loc; ++loc) {
     // Exclude indivs with missing genotype data
     vector<uint64_t> indivs_with_data;
-    uint64_t num_indivs_without_data = 0;
     for(uint64_t n = 0; n < _n; n++) {
       if(snpd[n][loc] != 3)
         indivs_with_data.push_back(n);
-      else
-        num_indivs_without_data++;
     }
-    // For debugging:
-    // lerr("%d indivs missing geno data at loc %d\n", num_indivs_without_data, loc);
     uint64_t num_indivs_with_data = indivs_with_data.size();
-    // Set doubled genotype vector and set covariate matrix
+    // For debugging:
+    // lerr("%d indivs missing geno data at loc %d\n", _n-num_indivs_with_data, loc);
+    // Set doubled genotype vector
     gsl_vector *y_dbl = gsl_vector_alloc(num_indivs_with_data*2);
+    // Set covariate matrix
     null_model.X = gsl_matrix_alloc(num_indivs_with_data*2, covs_null);
     alt_model.X = gsl_matrix_alloc(num_indivs_with_data*2, covs_alt);
+    // Set offset: pop struct-predicted genotype vect
+    gsl_vector *pi = gsl_vector_alloc(num_indivs_with_data*2);
     gsl_matrix_set_all(null_model.X, 1);
     gsl_matrix_set_all(alt_model.X, 1);
+    gsl_vector_set_zero(pi);
     for(uint64_t i = 0; i < num_indivs_with_data; i++) {
       uint64_t n = indivs_with_data[i];
       yval_t snpd_val = snpd[n][loc];
@@ -1009,22 +1010,17 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
       }
       gsl_matrix_set(alt_model.X, i, 1, _trait[n]);
       gsl_matrix_set(alt_model.X, i+num_indivs_with_data, 1, _trait[n]);
-    }
-    // Set offset: pop struct-predicted genotype vect
-    gsl_vector *pi = gsl_vector_alloc(num_indivs_with_data*2);
-    gsl_vector_set_zero(pi);
-    for (uint32_t k = 0; k < _k; ++k) {
-      double s = .0;
-      for (uint32_t t = 0; t < _t; ++t)
-        s += ld[loc][k][t];
-      double beta = ld[loc][k][0] / s;
-      for(uint64_t i = 0; i < num_indivs_with_data; ++i) {
-        uint64_t n = indivs_with_data[i];
-        gsl_vector_set(pi, i, beta*theta[n][k] + gsl_vector_get(pi, i));
+      for (uint32_t k = 0; k < _k; ++k) {
+        double s = .0;
+        for (uint32_t t = 0; t < _t; ++t)
+          s += ld[loc][k][t];
+        double beta = ld[loc][k][0] / s;
+        gsl_vector_set(pi, i, theta[n][k]*beta + gsl_vector_get(pi, i));
         gsl_vector_set(pi, i+num_indivs_with_data,
-          beta*theta[n][k] + gsl_vector_get(pi, i+num_indivs_with_data));
+          theta[n][k]*beta + gsl_vector_get(pi, i+num_indivs_with_data));
       }
     }
+
     // Create p (MLE)
     gsl_vector *p = gsl_vector_alloc(num_indivs_with_data*2);
     // Calculate difference in deviance
