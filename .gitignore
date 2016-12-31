@@ -12,3 +12,11 @@ Makefile
 *.o
 
 src/terastructure
+
+data/run.sh
+
+data/run.sh
+
+*.txt
+
+*.sh

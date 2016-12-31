@@ -998,17 +998,17 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
       uint64_t n = indivs_with_data[i];
       yval_t snpd_val = snpd[n][loc];
       if(snpd_val == 0) {
-        gsl_vector_set(y_dbl, 2*i, 0);
-        gsl_vector_set(y_dbl, (2*i)+1, 0);
+        gsl_vector_set(y_dbl, i, 0);
+        gsl_vector_set(y_dbl, i+num_indivs_with_data, 0);
       } else if(snpd_val == 1) {
-        gsl_vector_set(y_dbl, 2*i, 1);
-        gsl_vector_set(y_dbl, (2*i)+1, 0);
+        gsl_vector_set(y_dbl, i, 1);
+        gsl_vector_set(y_dbl, i+num_indivs_with_data, 0);
       } else if(snpd_val == 2) {
-        gsl_vector_set(y_dbl, 2*i, 1);
-        gsl_vector_set(y_dbl, (2*i)+1, 1);
+        gsl_vector_set(y_dbl, i, 1);
+        gsl_vector_set(y_dbl, i+num_indivs_with_data, 1);
       }
-      gsl_matrix_set(alt_model.X, 2*i, 1, _trait[n]);
-      gsl_matrix_set(alt_model.X, (2*i)+1, 1, _trait[n]);
+      gsl_matrix_set(alt_model.X, i, 1, _trait[n]);
+      gsl_matrix_set(alt_model.X, i+num_indivs_with_data, 1, _trait[n]);
     }
     // Set offset: pop struct-predicted genotype vect
     gsl_vector *pi = gsl_vector_alloc(num_indivs_with_data*2);
@@ -1020,8 +1020,9 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
       double beta = ld[loc][k][0] / s;
       for(uint64_t i = 0; i < num_indivs_with_data; ++i) {
         uint64_t n = indivs_with_data[i];
-        gsl_vector_set(pi, 2*i, beta*theta[n][k] + gsl_vector_get(pi, i));
-        gsl_vector_set(pi, (2*i)+1, beta*theta[n][k] + gsl_vector_get(pi, (2*i)+1));
+        gsl_vector_set(pi, i, beta*theta[n][k] + gsl_vector_get(pi, i));
+        gsl_vector_set(pi, i+num_indivs_with_data,
+          beta*theta[n][k] + gsl_vector_get(pi, i+num_indivs_with_data));
       }
     }
     // Create p (MLE)
@@ -1119,7 +1120,7 @@ SNPSamplingE::run_logreg(const gsl_vector *pi, const gsl_vector *y_dbl, gsl_vect
     gsl_blas_dgemv(CblasNoTrans, -1.0, X, b, 0.0, p);
     for(long i = 0; i < X_rows; i++) {
       double p_i = gsl_vector_get(p, i) - gsl_vector_get(pi, i);
-      gsl_vector_set(p, i, 1/(1+exp(gsl_vector_get(p, i))));
+      gsl_vector_set(p, i, 1/(1+exp(p_i)));
     }
     // var.b <- solve(crossprod(X, p * (1 - p) * X))
     gsl_matrix_set_zero(W);
