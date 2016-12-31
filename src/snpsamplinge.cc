@@ -985,18 +985,19 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
     uint64_t num_indivs_with_data = indivs_with_data.size();
     // For debugging:
     // lerr("%d indivs missing geno data at loc %d\n", _n-num_indivs_with_data, loc);
-    // Set doubled genotype vector
+    // Doubled genotype vector
     gsl_vector *y_dbl = gsl_vector_alloc(num_indivs_with_data*2);
-    // Set covariate matrix
+    // Covariate matrix
     null_model.X = gsl_matrix_alloc(num_indivs_with_data*2, covs_null);
     alt_model.X = gsl_matrix_alloc(num_indivs_with_data*2, covs_alt);
-    // Set offset: pop struct-predicted genotype vect
-    gsl_vector *pi = gsl_vector_alloc(num_indivs_with_data*2);
-    gsl_matrix_set_all(null_model.X, 1);
+    gsl_matrix_set_all(null_model.X, 1); // Intercept
     gsl_matrix_set_all(alt_model.X, 1);
+    // Offset: pop struct-predicted genotype vect
+    gsl_vector *pi = gsl_vector_alloc(num_indivs_with_data*2);
     gsl_vector_set_zero(pi);
     for(uint64_t i = 0; i < num_indivs_with_data; i++) {
       uint64_t n = indivs_with_data[i];
+      // Set doubled genotype vector
       yval_t snpd_val = snpd[n][loc];
       if(snpd_val == 0) {
         gsl_vector_set(y_dbl, i, 0);
@@ -1008,17 +1009,20 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
         gsl_vector_set(y_dbl, i, 1);
         gsl_vector_set(y_dbl, i+num_indivs_with_data, 1);
       }
+      // Set covariate matrix
       gsl_matrix_set(alt_model.X, i, 1, _trait[n]);
       gsl_matrix_set(alt_model.X, i+num_indivs_with_data, 1, _trait[n]);
+      // Set offset
+      double pi_n = 0;
       for (uint32_t k = 0; k < _k; ++k) {
         double s = .0;
         for (uint32_t t = 0; t < _t; ++t)
           s += ld[loc][k][t];
         double beta = ld[loc][k][0] / s;
-        gsl_vector_set(pi, i, theta[n][k]*beta + gsl_vector_get(pi, i));
-        gsl_vector_set(pi, i+num_indivs_with_data,
-          theta[n][k]*beta + gsl_vector_get(pi, i+num_indivs_with_data));
+        pi_n += theta[n][k]*beta;
       }
+      gsl_vector_set(pi, i, pi_n);
+      gsl_vector_set(pi, i+num_indivs_with_data, pi_n);
     }
 
     // Create p (MLE)
@@ -1121,7 +1125,7 @@ SNPSamplingE::run_logreg(const gsl_vector *pi, const gsl_vector *y_dbl, gsl_vect
     // var.b <- solve(crossprod(X, p * (1 - p) * X))
     gsl_matrix_set_zero(W);
     for(long i = 0; i < X_cols; i++) {
-      for(long j = i; j < X_cols; j++) {
+      for(long j = 0; j < X_cols; j++) {
         for(long k = 0; k < X_rows; k++) {
           double p_k = gsl_vector_get(p, k);
           double w_ij = gsl_matrix_get(W, i, j) +
@@ -1129,10 +1133,6 @@ SNPSamplingE::run_logreg(const gsl_vector *pi, const gsl_vector *y_dbl, gsl_vect
             gsl_matrix_get(X, k, j) *
             p_k * (1-p_k));
           gsl_matrix_set(W, i, j, w_ij);
-        }
-        // Reflect (symmetry)
-        if (i != j) {
-          gsl_matrix_set(W, j, i, gsl_matrix_get(W, i, j));
         }
       }
     }
@@ -1152,14 +1152,12 @@ SNPSamplingE::run_logreg(const gsl_vector *pi, const gsl_vector *y_dbl, gsl_vect
     for(long i = 0; i < X_cols; i++) {
       double bl_i = gsl_vector_get(bl, i);
       rel_change = fabs(gsl_vector_get(b, i) - bl_i) / (fabs(bl_i) + 0.01*_tol_irls);
-      if (rel_change > max_rel_change) {
+      if (rel_change > max_rel_change)
         max_rel_change = rel_change;
-      }
     }
-    if (max_rel_change < _tol_irls) {
+    if (max_rel_change < _tol_irls)
       break;
-    }
-    gsl_vector_memcpy(bl, b);
+    gsl_blas_dcopy(b, bl);
   }
 }
 
