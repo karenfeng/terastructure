@@ -1021,13 +1021,16 @@ SNPSamplingE::run_gcat_thread(const int thread_num)
         double beta = ld[loc][k][0] / s;
         pi_n += theta[n][k]*beta;
       }
-      gsl_vector_set(pi, i, pi_n);
-      gsl_vector_set(pi, i+num_indivs_with_data, pi_n);
+      gsl_vector_set(pi, i, log(pi_n/(1-pi_n)));
+      gsl_vector_set(pi, i+num_indivs_with_data, log(pi_n/(1-pi_n)));
     }
-
     // Create p (MLE)
     gsl_vector *p = gsl_vector_alloc(num_indivs_with_data*2);
     // Calculate difference in deviance
+    gsl_vector_set_zero(null_model.b);
+    gsl_vector_set_zero(alt_model.b);
+    gsl_vector_set_zero(null_model.bl);
+    gsl_vector_set_zero(alt_model.bl);
     diff_dev_d[loc] = calc_diff_dev(pi, y_dbl, p, &null_model, &alt_model);
     // Clean up
     gsl_vector_free(y_dbl);
@@ -1060,11 +1063,6 @@ double
 SNPSamplingE::calc_diff_dev(const gsl_vector *pi, const gsl_vector *y_dbl,
   gsl_vector *p, logreg_model_t *null_model, logreg_model_t *alt_model)
 {
-  // Set beta, beta-last
-  gsl_vector_set_zero(null_model->b);
-  gsl_vector_set_zero(alt_model->b);
-  gsl_vector_set_zero(null_model->bl);
-  gsl_vector_set_zero(alt_model->bl);
   // Calculate deviance for null model
   run_logreg(pi, y_dbl, p, null_model);
   double dev_null = calc_dev(y_dbl, p);
@@ -1109,7 +1107,6 @@ SNPSamplingE::run_logreg(const gsl_vector *pi, const gsl_vector *y_dbl, gsl_vect
   gsl_matrix *W = model->W;
   gsl_matrix *Wo = model->Wo;
   gsl_permutation *W_permut = model->W_permut;
-  gsl_vector_set_zero(p);
 
   // Utility sizes
   long X_rows = X->size1;
@@ -1119,21 +1116,21 @@ SNPSamplingE::run_logreg(const gsl_vector *pi, const gsl_vector *y_dbl, gsl_vect
     // p <- as.vector(1/(1 + exp(-X %*% b)))
     gsl_blas_dgemv(CblasNoTrans, -1.0, X, b, 0.0, p);
     for(long i = 0; i < X_rows; i++) {
-      double p_i = gsl_vector_get(p, i) - gsl_vector_get(pi, i);
-      gsl_vector_set(p, i, 1/(1+exp(p_i)));
+      gsl_vector_set(p, i,
+        1/(1+exp(gsl_vector_get(p, i) - gsl_vector_get(pi, i))));
     }
     // var.b <- solve(crossprod(X, p * (1 - p) * X))
     gsl_matrix_set_zero(W);
     for(long i = 0; i < X_cols; i++) {
-      for(long j = 0; j < X_cols; j++) {
+      for(long j = i; j < X_cols; j++) {
         for(long k = 0; k < X_rows; k++) {
-          double p_k = gsl_vector_get(p, k);
-          double w_ij = gsl_matrix_get(W, i, j) +
+          gsl_matrix_set(W, i, j, gsl_matrix_get(W, i, j) +
             (gsl_matrix_get(X, k, i) *
             gsl_matrix_get(X, k, j) *
-            p_k * (1-p_k));
-          gsl_matrix_set(W, i, j, w_ij);
+            gsl_vector_get(p, k) * (1-gsl_vector_get(p, k))));
         }
+        if(i != j)
+          gsl_matrix_set(W, j, i, gsl_matrix_get(W, i, j));
       }
     }
     gsl_linalg_LU_decomp(W, W_permut, &signum);
@@ -1150,8 +1147,8 @@ SNPSamplingE::run_logreg(const gsl_vector *pi, const gsl_vector *y_dbl, gsl_vect
     // Stopping condition
     max_rel_change = 0;
     for(long i = 0; i < X_cols; i++) {
-      double bl_i = gsl_vector_get(bl, i);
-      rel_change = fabs(gsl_vector_get(b, i) - bl_i) / (fabs(bl_i) + 0.01*_tol_irls);
+      rel_change = fabs(gsl_vector_get(b, i) - gsl_vector_get(bl, i)) /
+      (fabs(gsl_vector_get(bl, i)) + 0.01*_tol_irls);
       if (rel_change > max_rel_change)
         max_rel_change = rel_change;
     }
